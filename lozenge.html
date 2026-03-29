@@ -1,0 +1,1707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lozenge Tilings - Interactive Explorer</title>
+  <style>
+    /* ========================================================================
+       SECTION 1: CSS STYLES
+       ======================================================================== */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: Georgia, 'Times New Roman', serif;
+      background: #fafafa;
+      color: #2c2c2c;
+      overflow: hidden;
+      height: 100vh;
+    }
+    #app {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      height: 100vh;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 8px 16px;
+      border-bottom: 1px solid #ccc;
+      background: #fff;
+    }
+    header h1 {
+      font-size: 1.2rem;
+      font-weight: normal;
+    }
+    #status-badge {
+      font-size: 0.8rem;
+      padding: 2px 10px;
+      border-radius: 10px;
+      background: #ccc;
+      color: #fff;
+    }
+    #status-badge.tileable { background: #2a7; }
+    #status-badge.invalid { background: #c44; }
+    #main-layout {
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      overflow: hidden;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: crosshair;
+    }
+    #controls {
+      padding: 12px;
+      overflow-y: auto;
+      border-left: 1px solid #ccc;
+      background: #fff;
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 0.85rem;
+    }
+    .control-section {
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #eee;
+    }
+    .control-section h3 {
+      font-size: 0.9rem;
+      margin-bottom: 6px;
+      color: #555;
+    }
+    .control-section label {
+      display: block;
+      margin: 4px 0;
+    }
+    .control-section input[type="number"] {
+      width: 48px;
+      padding: 2px 4px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+    }
+    .control-section input[type="range"] {
+      width: 100%;
+    }
+    button {
+      padding: 4px 10px;
+      margin: 2px;
+      border: 1px solid #999;
+      border-radius: 3px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    button:hover { background: #f0f0f0; }
+    button.active {
+      background: #232D4B;
+      color: #fff;
+      border-color: #232D4B;
+    }
+    button:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+    #stats {
+      font-size: 0.75rem;
+      color: #888;
+      margin-top: 4px;
+    }
+    .row { display: flex; gap: 4px; align-items: center; margin: 4px 0; }
+    @media (max-width: 700px) {
+      #main-layout { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+      #controls { max-height: 40vh; border-left: none; border-top: 1px solid #ccc; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ========================================================================
+     SECTION 2: HTML STRUCTURE
+     ======================================================================== -->
+<div id="app">
+  <header>
+    <h1>Lozenge Tilings</h1>
+    <span id="status-badge">Empty</span>
+    <span style="flex:1"></span>
+    <a href="index.html" style="font-size:0.85rem; color:#1a5276;">Back</a>
+  </header>
+  <div id="main-layout">
+    <canvas id="canvas"></canvas>
+    <div id="controls">
+      <div class="control-section">
+        <h3>Presets</h3>
+        <label>Hexagon (a, b, c):</label>
+        <div class="row">
+          <input id="hex-a" type="number" value="5" min="1" max="30">
+          <input id="hex-b" type="number" value="5" min="1" max="30">
+          <input id="hex-c" type="number" value="5" min="1" max="30">
+          <button id="btn-hexagon">Create</button>
+        </div>
+      </div>
+      <div class="control-section">
+        <h3>Drawing</h3>
+        <div class="row">
+          <button id="btn-draw" class="active">Draw</button>
+          <button id="btn-erase">Erase</button>
+          <button id="btn-clear">Clear All</button>
+        </div>
+        <p style="font-size:0.75rem; color:#888; margin-top:4px;">
+          Click to add/remove triangles. Ctrl+drag or right-drag to pan. Scroll to zoom.
+        </p>
+      </div>
+      <div class="control-section">
+        <h3>Glauber Dynamics</h3>
+        <button id="btn-start-stop" disabled>Start</button>
+        <label>Speed (steps/frame):
+          <input id="speed-slider" type="range" min="1" max="1000" value="100">
+          <span id="speed-label">100</span>
+        </label>
+        <label>q-bias:
+          <input id="q-input" type="number" value="1.0" min="0.01" max="100" step="0.01">
+        </label>
+        <div id="stats">Steps: 0 | Flips: 0</div>
+      </div>
+      <div class="control-section">
+        <h3>View</h3>
+        <label><input id="show-grid" type="checkbox" checked> Show grid</label>
+        <label><input id="show-height" type="checkbox"> Height heatmap</label>
+        <button id="btn-export">Export PNG</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================================
+// LOZENGE TILING EXPLORER
+//
+// A self-contained, student-readable implementation of lozenge tilings on the
+// triangular lattice. Lozenges (rhombi) are dimers on the triangular lattice,
+// equivalently perfect matchings of the dual hexagonal lattice.
+//
+// The code is organized into clearly-labeled sections:
+//   Section 3:  Lattice Geometry
+//   Section 4:  Region & Grid Data Structures
+//   Section 5:  Dimer Storage & Manipulation
+//   Section 6:  Dinic's Max-Flow (Initial Matching)
+//   Section 7:  Glauber Dynamics (MCMC Sampling)
+//   Section 8:  Canvas Renderer
+//   Section 9:  Height Function
+//   Section 10: UI Controls & Interaction
+//   Section 11: Initialization
+// ============================================================================
+
+'use strict';
+
+// ============================================================================
+// SECTION 3: LATTICE GEOMETRY
+//
+// The triangular lattice tiles the plane with equilateral triangles.
+// We use oblique coordinates (n, j) where:
+//
+//   Cartesian x = n
+//   Cartesian y = (1/sqrt(3)) * n  +  (2/sqrt(3)) * j
+//
+// This means:
+//   - Increasing n moves right along x and slightly up (slope 1/sqrt(3))
+//   - Increasing j moves up by 2/sqrt(3)
+//
+// The lattice is BIPARTITE: triangles alternate between two colors.
+//   - BLACK (right-pointing, type 1): vertices (n,j), (n,j-1), (n+1,j-1)
+//   - WHITE (left-pointing, type 2):  vertices (n,j), (n+1,j), (n+1,j-1)
+//
+// A lozenge (dimer) pairs one black triangle with one adjacent white triangle.
+// There are exactly 3 ways to pair Black(n,j) with a neighbor:
+//   Type 0 (diagonal):      White(n,j)    - shares edge (n,j)-(n+1,j-1)
+//   Type 1 (bottom):        White(n,j-1)  - shares edge (n,j-1)-(n+1,j-1... wait)
+//   Type 2 (left-vertical): White(n-1,j)  - shares edge (n,j)-(n,j-1)
+//
+// Visually, the three lozenge types look like the three visible faces of a
+// unit cube in isometric projection (top, front-right, front-left).
+// ============================================================================
+
+const SLOPE = 1 / Math.sqrt(3);    // = tan(30 degrees)
+const DELTA_C = 2 / Math.sqrt(3);  // vertical spacing between j-levels
+
+/**
+ * Convert lattice coordinates (n, j) to Cartesian (x, y).
+ * These are the vertices of the triangular lattice.
+ */
+function getVertex(n, j) {
+  return { x: n, y: SLOPE * n + j * DELTA_C };
+}
+
+/**
+ * Centroid of Black (right-pointing) triangle R(n, j).
+ * Vertices: (n,j), (n,j-1), (n+1,j-1)
+ */
+function getRightTriangleCentroid(n, j) {
+  const v1 = getVertex(n, j);
+  const v2 = getVertex(n, j - 1);
+  const v3 = getVertex(n + 1, j - 1);
+  return { x: (v1.x + v2.x + v3.x) / 3, y: (v1.y + v2.y + v3.y) / 3 };
+}
+
+/**
+ * Centroid of White (left-pointing) triangle L(n, j).
+ * Vertices: (n,j), (n+1,j), (n+1,j-1)
+ */
+function getLeftTriangleCentroid(n, j) {
+  const v1 = getVertex(n, j);
+  const v2 = getVertex(n + 1, j);
+  const v3 = getVertex(n + 1, j - 1);
+  return { x: (v1.x + v2.x + v3.x) / 3, y: (v1.y + v2.y + v3.y) / 3 };
+}
+
+/**
+ * The 4 vertices of the lozenge (rhombus) for a dimer of given type
+ * anchored at black triangle (bn, bj).
+ *
+ * Type 0 (diagonal):      Black(bn,bj) + White(bn,bj)
+ *   Vertices: (bn,bj), (bn+1,bj), (bn+1,bj-1), (bn,bj-1)
+ *
+ * Type 1 (bottom):        Black(bn,bj) + White(bn,bj-1)
+ *   Vertices: (bn,bj), (bn+1,bj-1), (bn+1,bj-2), (bn,bj-1)
+ *
+ * Type 2 (left-vertical): Black(bn,bj) + White(bn-1,bj)
+ *   Vertices: (bn-1,bj), (bn,bj), (bn+1,bj-1), (bn,bj-1)
+ */
+function getLozengeVertices(bn, bj, type) {
+  if (type === 0) {
+    return [getVertex(bn, bj), getVertex(bn + 1, bj), getVertex(bn + 1, bj - 1), getVertex(bn, bj - 1)];
+  } else if (type === 1) {
+    return [getVertex(bn, bj), getVertex(bn + 1, bj - 1), getVertex(bn + 1, bj - 2), getVertex(bn, bj - 1)];
+  } else {
+    return [getVertex(bn - 1, bj), getVertex(bn, bj), getVertex(bn + 1, bj - 1), getVertex(bn, bj - 1)];
+  }
+}
+
+/**
+ * Point-in-polygon test using ray casting.
+ * Counts how many times a horizontal ray from (x,y) to the right crosses polygon edges.
+ * Odd crossings = inside.
+ */
+function pointInPolygon(px, py, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x, yi = polygon[i].y;
+    const xj = polygon[j].x, yj = polygon[j].y;
+    if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/**
+ * Point-in-triangle test using the sign/cross-product method.
+ * A point is inside triangle (v1,v2,v3) if all three cross products
+ * have the same sign.
+ */
+function pointInTriangle(px, py, v1, v2, v3) {
+  const s1 = (px - v2.x) * (v1.y - v2.y) - (v1.x - v2.x) * (py - v2.y);
+  const s2 = (px - v3.x) * (v2.y - v3.y) - (v2.x - v3.x) * (py - v3.y);
+  const s3 = (px - v1.x) * (v3.y - v1.y) - (v3.x - v1.x) * (py - v1.y);
+  const hasNeg = (s1 < 0) || (s2 < 0) || (s3 < 0);
+  const hasPos = (s1 > 0) || (s2 > 0) || (s3 > 0);
+  return !(hasNeg && hasPos);
+}
+
+/**
+ * Given world coordinates (x, y), find which triangle contains the point.
+ * Returns { n, j, type } where type is 1 (black) or 2 (white), or null.
+ *
+ * We first estimate the lattice cell (n, j) from the coordinates, then
+ * check a small neighborhood to handle rounding at cell boundaries.
+ */
+function getTriangleFromWorld(x, y) {
+  const n = Math.floor(x);
+  const j = Math.floor((y - SLOPE * n) / DELTA_C);
+
+  // Check a neighborhood of candidate cells
+  const candidates = [
+    [n, j], [n, j + 1], [n + 1, j], [n - 1, j],
+    [n, j - 1], [n + 1, j - 1], [n - 1, j + 1]
+  ];
+
+  for (const [cn, cj] of candidates) {
+    // Black (right-pointing) triangle R(cn, cj)
+    const bv1 = getVertex(cn, cj);
+    const bv2 = getVertex(cn, cj - 1);
+    const bv3 = getVertex(cn + 1, cj - 1);
+    if (pointInTriangle(x, y, bv1, bv2, bv3)) return { n: cn, j: cj, type: 1 };
+
+    // White (left-pointing) triangle L(cn, cj)
+    const wv1 = getVertex(cn, cj);
+    const wv2 = getVertex(cn + 1, cj);
+    const wv3 = getVertex(cn + 1, cj - 1);
+    if (pointInTriangle(x, y, wv1, wv2, wv3)) return { n: cn, j: cj, type: 2 };
+  }
+  return null;
+}
+
+
+// ============================================================================
+// SECTION 4: REGION & GRID DATA STRUCTURES
+//
+// We maintain two representations of the tiling state:
+//
+// 1. activeTriangles: A Map<string, {n,j,type}> of all triangles in the
+//    user-drawn region. Keys are "n,j,type". This is the user-facing state.
+//
+// 2. dimerGrid: A flat Int8Array for O(1) dimer lookups during Glauber dynamics.
+//    Each entry stores the dimer type (0, 1, or 2) for the black triangle at
+//    that grid position, or -1 if unmatched.
+//
+// The flat array is indexed by: (n - gridMinN) * gridStrideJ + (j - gridMinJ)
+// We add padding of 2 around the region bounds to handle edge lookups safely.
+// ============================================================================
+
+let activeTriangles = new Map();
+
+// Separated lists for the matching algorithm
+let blackTriangles = [];
+let whiteTriangles = [];
+let blackMap = new Map();   // key -> index in blackTriangles
+let whiteMap = new Map();   // key -> index in whiteTriangles
+
+// Flat grid for O(1) dimer lookups
+let dimerGrid = null;
+let gridMinN = 0, gridMaxN = 0, gridMinJ = 0, gridMaxJ = 0, gridStrideJ = 0;
+
+// Lattice vertices for Glauber dynamics (all vertices inside the region)
+let latticeVertices = [];
+
+/**
+ * Encode (n, j) as a single integer key for Map lookups.
+ * We shift by 10000 to handle negative coordinates.
+ */
+function makeKey(n, j) {
+  return (n + 10000) * 100000 + (j + 10000);
+}
+
+/**
+ * Convert (n, j) to an index into the flat dimerGrid array.
+ */
+function getGridIdx(n, j) {
+  return (n - gridMinN) * gridStrideJ + (j - gridMinJ);
+}
+
+/**
+ * Parse activeTriangles into separate black/white arrays and maps.
+ * Also allocates the flat dimerGrid.
+ */
+function buildGridFromTriangles() {
+  blackTriangles = [];
+  whiteTriangles = [];
+  blackMap = new Map();
+  whiteMap = new Map();
+
+  let minN = 1e9, maxN = -1e9, minJ = 1e9, maxJ = -1e9;
+
+  for (const tri of activeTriangles.values()) {
+    minN = Math.min(minN, tri.n);
+    maxN = Math.max(maxN, tri.n);
+    minJ = Math.min(minJ, tri.j);
+    maxJ = Math.max(maxJ, tri.j);
+
+    if (tri.type === 1) {
+      blackMap.set(makeKey(tri.n, tri.j), blackTriangles.length);
+      blackTriangles.push(tri);
+    } else {
+      whiteMap.set(makeKey(tri.n, tri.j), whiteTriangles.length);
+      whiteTriangles.push(tri);
+    }
+  }
+
+  // Allocate grid with padding
+  gridMinN = minN - 2;
+  gridMaxN = maxN + 2;
+  gridMinJ = minJ - 2;
+  gridMaxJ = maxJ + 2;
+  gridStrideJ = gridMaxJ - gridMinJ + 1;
+  dimerGrid = new Int8Array((gridMaxN - gridMinN + 1) * gridStrideJ).fill(-1);
+}
+
+
+// ============================================================================
+// SECTION 5: DIMER STORAGE & MANIPULATION
+//
+// A dimer (perfect matching edge) connects one black triangle to one adjacent
+// white triangle. On the hexagonal dual lattice, each vertex has degree 3,
+// and a perfect matching covers every vertex exactly once.
+//
+// Around each vertex of the triangular lattice, there are 6 incident edges
+// of the dual hexagonal lattice. In any perfect matching, exactly 3 of these
+// 6 edges are covered. The Glauber dynamics "flip" swaps which 3 are covered.
+//
+// Geometrically, a flip corresponds to adding or removing a unit cube from
+// the 3D stepped surface (height function) that the lozenge tiling represents.
+// ============================================================================
+
+/**
+ * Determine dimer type from relative position of white triangle to black.
+ *   Type 0: same (n,j) -> diagonal
+ *   Type 1: white is at (n, j-1) -> bottom
+ *   Type 2: white is at (n-1, j) -> left-vertical
+ */
+function getDimerType(blackN, blackJ, whiteN, whiteJ) {
+  const dn = whiteN - blackN;
+  const dj = whiteJ - blackJ;
+  if (dn === 0 && dj === 0) return 0;
+  if (dn === 0 && dj === -1) return 1;
+  if (dn === -1 && dj === 0) return 2;
+  return -1; // invalid
+}
+
+/**
+ * Inverse: given black position and dimer type, compute white position.
+ */
+function getWhiteFromType(bn, bj, type) {
+  if (type === 0) return { n: bn, j: bj };
+  if (type === 1) return { n: bn, j: bj - 1 };
+  if (type === 2) return { n: bn - 1, j: bj };
+  return null;
+}
+
+/**
+ * Check if a specific dimer exists in the grid. O(1) lookup.
+ */
+function dimerExists(blackN, blackJ, whiteN, whiteJ) {
+  if (blackN < gridMinN || blackN > gridMaxN || blackJ < gridMinJ || blackJ > gridMaxJ) {
+    return false;
+  }
+  const idx = getGridIdx(blackN, blackJ);
+  if (idx < 0 || idx >= dimerGrid.length) return false;
+  const typeInGrid = dimerGrid[idx];
+  if (typeInGrid === -1) return false;
+  return typeInGrid === getDimerType(blackN, blackJ, whiteN, whiteJ);
+}
+
+/**
+ * The 6 hex edges around a triangular lattice vertex (n, j).
+ *
+ * Each edge connects a black triangle to an adjacent white triangle.
+ * These are the 6 edges of the hexagonal dual lattice meeting at this vertex.
+ *
+ * In any perfect matching, exactly 3 of these 6 are covered (carry a dimer).
+ * A Glauber flip swaps the 3 covered with the 3 uncovered.
+ *
+ * The 6 edges (in cyclic order around the vertex):
+ *   0: R(n, j+1)   - L(n, j)     type 1 (bottom)
+ *   1: R(n, j)     - L(n, j)     type 0 (diagonal)
+ *   2: R(n, j)     - L(n-1, j)   type 2 (left-vertical)
+ *   3: R(n-1, j+1) - L(n-1, j)   type 1 (bottom)
+ *   4: R(n-1, j+1) - L(n-1, j+1) type 0 (diagonal)
+ *   5: R(n, j+1)   - L(n-1, j+1) type 2 (left-vertical)
+ */
+function getHexEdgesAroundVertex(n, j) {
+  return [
+    { blackN: n,   blackJ: j+1, whiteN: n,   whiteJ: j,   type: 1 },
+    { blackN: n,   blackJ: j,   whiteN: n,   whiteJ: j,   type: 0 },
+    { blackN: n,   blackJ: j,   whiteN: n-1, whiteJ: j,   type: 2 },
+    { blackN: n-1, blackJ: j+1, whiteN: n-1, whiteJ: j,   type: 1 },
+    { blackN: n-1, blackJ: j+1, whiteN: n-1, whiteJ: j+1, type: 0 },
+    { blackN: n,   blackJ: j+1, whiteN: n-1, whiteJ: j+1, type: 2 },
+  ];
+}
+
+/**
+ * Extract all dimers from the grid as an array of {bn, bj, t} objects.
+ */
+function exportDimers() {
+  const dimers = [];
+  for (const bt of blackTriangles) {
+    const idx = getGridIdx(bt.n, bt.j);
+    if (idx >= 0 && idx < dimerGrid.length && dimerGrid[idx] !== -1) {
+      dimers.push({ bn: bt.n, bj: bt.j, t: dimerGrid[idx] });
+    }
+  }
+  return dimers;
+}
+
+
+// ============================================================================
+// SECTION 6: DINIC'S MAX-FLOW FOR INITIAL PERFECT MATCHING
+//
+// To find an initial lozenge tiling of a user-drawn region, we need a
+// perfect matching in the bipartite graph of adjacent black/white triangles.
+//
+// We reduce this to a max-flow problem:
+//   - Source S connects to every black triangle (capacity 1)
+//   - Every white triangle connects to Sink T (capacity 1)
+//   - Black(n,j) connects to its 0-3 white neighbors (capacity 1)
+//
+// By Konig's theorem, max-flow = max-matching in bipartite graphs.
+// Dinic's algorithm runs in O(E * sqrt(V)) on bipartite graphs, which is
+// fast enough for any region a student would draw (under 1ms for ~1000 triangles).
+//
+// A perfect matching exists iff:
+//   1. #black == #white  (equal counts)
+//   2. The max flow equals #black  (no topological obstructions)
+// ============================================================================
+
+/**
+ * Flow network edge: {to, cap, flow, rev}
+ *   to:   destination node
+ *   cap:  capacity
+ *   flow: current flow
+ *   rev:  index of reverse edge in adj[to]
+ */
+
+let flowAdj = [];   // adjacency lists
+let flowLevel = []; // BFS level for Dinic's
+let flowPtr = [];   // current-arc pointer for DFS
+
+function addFlowEdge(from, to, cap) {
+  flowAdj[from].push({ to, cap, flow: 0, rev: flowAdj[to].length });
+  flowAdj[to].push({ to: from, cap: 0, flow: 0, rev: flowAdj[from].length - 1 });
+}
+
+/**
+ * BFS to build the level graph. Returns true if sink is reachable.
+ */
+function bfsFlow(s, t) {
+  flowLevel.fill(-1);
+  flowLevel[s] = 0;
+  const queue = [s];
+  let head = 0;
+  while (head < queue.length) {
+    const v = queue[head++];
+    for (const edge of flowAdj[v]) {
+      if (edge.cap - edge.flow > 0 && flowLevel[edge.to] === -1) {
+        flowLevel[edge.to] = flowLevel[v] + 1;
+        queue.push(edge.to);
+      }
+    }
+  }
+  return flowLevel[t] !== -1;
+}
+
+/**
+ * DFS to push blocking flow along the level graph.
+ */
+function dfsFlow(v, t, pushed) {
+  if (pushed === 0) return 0;
+  if (v === t) return pushed;
+  for (; flowPtr[v] < flowAdj[v].length; flowPtr[v]++) {
+    const edge = flowAdj[v][flowPtr[v]];
+    if (flowLevel[v] + 1 !== flowLevel[edge.to] || edge.cap - edge.flow === 0) continue;
+    const push = dfsFlow(edge.to, t, Math.min(pushed, edge.cap - edge.flow));
+    if (push === 0) continue;
+    edge.flow += push;
+    flowAdj[edge.to][edge.rev].flow -= push;
+    return push;
+  }
+  return 0;
+}
+
+/**
+ * Dinic's max-flow algorithm.
+ * Repeatedly builds level graphs via BFS and pushes blocking flows via DFS.
+ */
+function dinic(s, t) {
+  let totalFlow = 0;
+  while (bfsFlow(s, t)) {
+    flowPtr.fill(0);
+    let pushed;
+    while ((pushed = dfsFlow(s, t, Infinity)) > 0) {
+      totalFlow += pushed;
+    }
+  }
+  return totalFlow;
+}
+
+/**
+ * Find an initial perfect matching using Dinic's max-flow.
+ * Returns true if a perfect matching was found.
+ *
+ * The bipartite graph has:
+ *   Node 0..numBlack-1:                 black triangles
+ *   Node numBlack..numBlack+numWhite-1: white triangles
+ *   Node S = numBlack + numWhite:       source
+ *   Node T = S + 1:                     sink
+ *
+ * Edges:
+ *   S -> each black (cap 1)
+ *   each white -> T (cap 1)
+ *   Black(n,j) -> White(n,j) if exists      [type 0: diagonal]
+ *   Black(n,j) -> White(n,j-1) if exists     [type 1: bottom]
+ *   Black(n,j) -> White(n-1,j) if exists     [type 2: left-vertical]
+ */
+function findInitialMatching() {
+  const numBlack = blackTriangles.length;
+  const numWhite = whiteTriangles.length;
+  const S = numBlack + numWhite;
+  const T = S + 1;
+
+  // Initialize flow network
+  flowAdj = new Array(T + 1);
+  for (let i = 0; i <= T; i++) flowAdj[i] = [];
+  flowLevel = new Int32Array(T + 1);
+  flowPtr = new Int32Array(T + 1);
+
+  // Source -> blacks
+  for (let i = 0; i < numBlack; i++) {
+    addFlowEdge(S, i, 1);
+  }
+
+  // Whites -> sink
+  for (let i = 0; i < numWhite; i++) {
+    addFlowEdge(numBlack + i, T, 1);
+  }
+
+  // Blacks -> adjacent whites
+  // Each Black(n,j) can pair with at most 3 white neighbors
+  for (let i = 0; i < numBlack; i++) {
+    const bn = blackTriangles[i].n;
+    const bj = blackTriangles[i].j;
+    const neighbors = [
+      [bn, bj],       // type 0: diagonal
+      [bn, bj - 1],   // type 1: bottom
+      [bn - 1, bj],   // type 2: left-vertical
+    ];
+    for (const [wn, wj] of neighbors) {
+      const wIdx = whiteMap.get(makeKey(wn, wj));
+      if (wIdx !== undefined) {
+        addFlowEdge(i, numBlack + wIdx, 1);
+      }
+    }
+  }
+
+  // Run Dinic's
+  const maxFlow = dinic(S, T);
+  const tileable = (numBlack === numWhite && maxFlow === numBlack && numBlack > 0);
+
+  if (!tileable) return false;
+
+  // Extract matching: for each black node, find the flow-carrying edge to a white node
+  for (let i = 0; i < numBlack; i++) {
+    for (const e of flowAdj[i]) {
+      if (e.to >= numBlack && e.to < S && e.flow === 1) {
+        const wIdx = e.to - numBlack;
+        const type = getDimerType(
+          blackTriangles[i].n, blackTriangles[i].j,
+          whiteTriangles[wIdx].n, whiteTriangles[wIdx].j
+        );
+        const gridIdx = getGridIdx(blackTriangles[i].n, blackTriangles[i].j);
+        if (gridIdx >= 0 && gridIdx < dimerGrid.length) {
+          dimerGrid[gridIdx] = type;
+        }
+        break;
+      }
+    }
+  }
+
+  return true;
+}
+
+
+// ============================================================================
+// SECTION 7: GLAUBER DYNAMICS (MCMC SAMPLING)
+//
+// Glauber dynamics is a Markov Chain Monte Carlo (MCMC) method that generates
+// random lozenge tilings. Starting from any valid tiling, it makes random
+// local changes ("flips") that preserve the matching property.
+//
+// THE ELEMENTARY MOVE (FLIP):
+// Around each vertex of the triangular lattice, exactly 3 of 6 hex edges
+// carry dimers. A flip swaps the 3 covered edges with the 3 uncovered ones.
+// This corresponds to adding or removing a unit cube from the 3D stepped
+// surface ("box-stacking" picture).
+//
+// ACCEPTANCE PROBABILITY:
+// For the uniform distribution (q = 1), every flip is accepted.
+// For the q-volume measure, the weight of a tiling is proportional to
+// q^(volume), where volume counts how many unit cubes are in the stack.
+// The Metropolis acceptance probability is:
+//   Accept with probability min(1, q^(delta_volume))
+// where delta_volume is +1 (adding a cube) or -1 (removing a cube).
+//
+// This simplifies to:
+//   Adding a cube:    accept with probability q/(1+q)
+//   Removing a cube:  accept with probability 1/(1+q)
+//   (when q=1, both are 1/2, but since we always flip when valid, it's 1)
+//
+// CONVERGENCE: For the a x b x c hexagon, the mixing time is
+// O(N^(1+o(1))) where N = number of lozenges (conjectured).
+// ============================================================================
+
+// Statistics
+let totalSteps = 0;
+let flipCount = 0;
+
+/**
+ * Collect all triangular lattice vertices inside the region.
+ * These are the potential flip sites for Glauber dynamics.
+ * A vertex (n,j) is included if it appears as a corner of any triangle in the region.
+ */
+function collectVertices() {
+  const vertexSet = new Set();
+  for (const bt of blackTriangles) {
+    // Black triangle R(n,j) has vertices (n,j), (n,j-1), (n+1,j-1)
+    vertexSet.add(`${bt.n},${bt.j}`);
+    vertexSet.add(`${bt.n},${bt.j - 1}`);
+    vertexSet.add(`${bt.n + 1},${bt.j - 1}`);
+  }
+  for (const wt of whiteTriangles) {
+    // White triangle L(n,j) has vertices (n,j), (n+1,j), (n+1,j-1)
+    vertexSet.add(`${wt.n},${wt.j}`);
+    vertexSet.add(`${wt.n + 1},${wt.j}`);
+    vertexSet.add(`${wt.n + 1},${wt.j - 1}`);
+  }
+  latticeVertices = [];
+  for (const key of vertexSet) {
+    const [n, j] = key.split(',').map(Number);
+    latticeVertices.push({ n, j });
+  }
+}
+
+/**
+ * Try to flip the hex around vertex (n, j).
+ *
+ * 1. Get the 6 hex edges around this vertex
+ * 2. Classify each as covered (dimer exists) or uncovered
+ * 3. If exactly 3 covered and 3 uncovered, it's a valid flip
+ * 4. Compute volume change (for acceptance probability)
+ * 5. If execute=true, perform the flip (remove 3 old, add 3 new dimers)
+ *
+ * Returns: volume change direction (+1, -1, or 0), or null if invalid.
+ */
+function tryFlip(n, j, execute) {
+  const edges = getHexEdgesAroundVertex(n, j);
+
+  const coveredIdx = [];
+  const uncoveredIdx = [];
+
+  for (let i = 0; i < 6; i++) {
+    const e = edges[i];
+    if (dimerExists(e.blackN, e.blackJ, e.whiteN, e.whiteJ)) {
+      coveredIdx.push(i);
+      if (coveredIdx.length > 3) return null;  // >3 covered = not flippable
+    } else {
+      uncoveredIdx.push(i);
+      if (uncoveredIdx.length > 3) return null;
+    }
+  }
+
+  if (coveredIdx.length !== 3 || uncoveredIdx.length !== 3) return null;
+
+  // Compute volume change.
+  // Volume is determined by type-0 (diagonal) dimers: each contributes its blackN
+  // to the "volume" (height function). The change in volume when flipping is
+  // the difference in type-0 contributions between the new and old configurations.
+  let volumeBefore = 0, volumeAfter = 0;
+  for (const idx of coveredIdx) {
+    if (edges[idx].type === 0) volumeBefore += edges[idx].blackN;
+  }
+  for (const idx of uncoveredIdx) {
+    if (edges[idx].type === 0) volumeAfter += edges[idx].blackN;
+  }
+
+  const volumeChange = volumeAfter - volumeBefore;
+
+  if (!execute) {
+    return volumeChange > 0 ? 1 : (volumeChange < 0 ? -1 : 0);
+  }
+
+  // Execute the flip: remove old dimers, add new ones
+  for (const idx of coveredIdx) {
+    const e = edges[idx];
+    if (e.blackN >= gridMinN && e.blackN <= gridMaxN && e.blackJ >= gridMinJ && e.blackJ <= gridMaxJ) {
+      const gridIdx = getGridIdx(e.blackN, e.blackJ);
+      if (gridIdx >= 0 && gridIdx < dimerGrid.length) dimerGrid[gridIdx] = -1;
+    }
+  }
+
+  for (const idx of uncoveredIdx) {
+    const e = edges[idx];
+    if (e.blackN < gridMinN || e.blackN > gridMaxN || e.blackJ < gridMinJ || e.blackJ > gridMaxJ) continue;
+    // Only add the dimer if both black and white triangles are in the region
+    if (blackMap.has(makeKey(e.blackN, e.blackJ)) && whiteMap.has(makeKey(e.whiteN, e.whiteJ))) {
+      const gridIdx = getGridIdx(e.blackN, e.blackJ);
+      if (gridIdx >= 0 && gridIdx < dimerGrid.length) dimerGrid[gridIdx] = e.type;
+    }
+  }
+
+  return volumeChange > 0 ? 1 : (volumeChange < 0 ? -1 : 0);
+}
+
+/**
+ * Perform multiple Glauber steps.
+ *
+ * Each step:
+ *   1. Pick a random vertex from the pre-computed list
+ *   2. Check if the hex around it is flippable
+ *   3. Compute volume change direction
+ *   4. Accept with Metropolis probability:
+ *      - If volume increases: accept with prob q/(1+q)
+ *      - If volume decreases: accept with prob 1/(1+q)
+ *      - If volume unchanged:  always accept (prob 1)
+ *   5. If accepted, execute the flip
+ */
+function glauberSteps(numSteps, q) {
+  if (latticeVertices.length === 0) return;
+
+  const N = latticeVertices.length;
+  // Precompute acceptance probabilities
+  const probUp = q / (1 + q);
+  const probDown = 1 / (1 + q);
+
+  for (let s = 0; s < numSteps; s++) {
+    totalSteps++;
+
+    // Pick a random vertex
+    const idx = Math.floor(Math.random() * N);
+    const v = latticeVertices[idx];
+
+    // Try the flip (without executing) to get volume change direction
+    const dir = tryFlip(v.n, v.j, false);
+    if (dir === null) continue;  // not flippable
+
+    // Metropolis acceptance
+    let accept = false;
+    if (dir === 0) {
+      // Volume unchanged: always accept
+      accept = true;
+    } else if (dir > 0) {
+      accept = Math.random() < probUp;
+    } else {
+      accept = Math.random() < probDown;
+    }
+
+    if (accept) {
+      tryFlip(v.n, v.j, true);
+      flipCount++;
+    }
+  }
+}
+
+
+// ============================================================================
+// SECTION 8: CANVAS RENDERER
+//
+// Draws the triangular lattice, the user's region, and the lozenge tiling
+// onto an HTML5 Canvas using the 2D rendering context.
+//
+// The three lozenge types are colored with UVA colors:
+//   Type 0 (diagonal):      #E57200  (orange)  - "top face" of cube
+//   Type 1 (bottom):        #232D4B  (navy)    - "right face"
+//   Type 2 (left-vertical): #F9DCBF  (cream)   - "left face"
+// ============================================================================
+
+const LOZENGE_COLORS = ['#E57200', '#232D4B', '#F9DCBF'];
+
+// Canvas state
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let displayWidth = 0, displayHeight = 0;
+let zoom = 1, panX = 0, panY = 0;
+
+/**
+ * Set up canvas dimensions accounting for device pixel ratio.
+ * We cap DPR at 2 to prevent memory issues on high-DPI mobile devices.
+ */
+function setupCanvas() {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  displayWidth = rect.width;
+  displayHeight = rect.height;
+}
+
+/**
+ * Compute the canvas transform: center position and scale factor.
+ * The "world" is in lattice coordinates; the canvas maps a window of
+ * world space centered at (panX, panY) with the given zoom level.
+ */
+function getTransform() {
+  const baseViewSize = 20; // world units visible at zoom=1
+  const baseScale = Math.min(displayWidth, displayHeight) / baseViewSize;
+  const scale = baseScale * zoom;
+  const centerX = displayWidth / 2 - panX * scale;
+  const centerY = displayHeight / 2 + panY * scale;
+  return { centerX, centerY, scale };
+}
+
+/** World coordinates -> canvas pixel coordinates */
+function toCanvas(x, y, centerX, centerY, scale) {
+  return [centerX + x * scale, centerY - y * scale];
+}
+
+/** Canvas pixel coordinates -> world coordinates */
+function fromCanvas(cx, cy, centerX, centerY, scale) {
+  return { x: (cx - centerX) / scale, y: (centerY - cy) / scale };
+}
+
+/** Zoom centered on a canvas point */
+function zoomAt(canvasX, canvasY, factor) {
+  const { centerX, centerY, scale } = getTransform();
+  const worldX = (canvasX - centerX) / scale;
+  const worldY = (centerY - canvasY) / scale;
+  const newZoom = Math.max(0.05, Math.min(20, zoom * factor));
+  const actualFactor = newZoom / zoom;
+  zoom = newZoom;
+  const newScale = scale * actualFactor;
+  panX = (displayWidth / 2 - canvasX) / newScale + worldX;
+  panY = (canvasY - displayHeight / 2) / newScale + worldY;
+}
+
+/** Auto-zoom to fit the current region */
+function fitToRegion() {
+  if (activeTriangles.size === 0) {
+    zoom = 1; panX = 0; panY = 0;
+    return;
+  }
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const tri of activeTriangles.values()) {
+    const c = tri.type === 1 ? getRightTriangleCentroid(tri.n, tri.j)
+                              : getLeftTriangleCentroid(tri.n, tri.j);
+    minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x);
+    minY = Math.min(minY, c.y); maxY = Math.max(maxY, c.y);
+  }
+  const worldW = maxX - minX + 2;
+  const worldH = maxY - minY + 2;
+  const baseViewSize = 20;
+  const baseScale = Math.min(displayWidth, displayHeight) / baseViewSize;
+  const fitZoom = Math.min(displayWidth / (worldW * baseScale), displayHeight / (worldH * baseScale));
+  zoom = fitZoom * 0.85; // 85% to leave margin
+  panX = -(minX + maxX) / 2;
+  panY = -(minY + maxY) / 2;
+}
+
+/**
+ * Draw the triangular lattice grid lines.
+ * The grid has 3 families of parallel lines.
+ */
+function drawGrid() {
+  const { centerX, centerY, scale } = getTransform();
+
+  // Determine visible world bounds
+  const tl = fromCanvas(0, 0, centerX, centerY, scale);
+  const br = fromCanvas(displayWidth, displayHeight, centerX, centerY, scale);
+  const worldLeft = Math.min(tl.x, br.x) - 1;
+  const worldRight = Math.max(tl.x, br.x) + 1;
+  const worldBottom = Math.min(tl.y, br.y) - 1;
+  const worldTop = Math.max(tl.y, br.y) + 1;
+
+  ctx.strokeStyle = '#e0e0e0';
+  ctx.lineWidth = 0.5;
+
+  // Family 1: vertical-ish lines (constant n)
+  const nMin = Math.floor(worldLeft) - 1;
+  const nMax = Math.ceil(worldRight) + 1;
+  const jRange = Math.ceil((worldTop - worldBottom) / DELTA_C) + 4;
+  const jBase = Math.floor(worldBottom / DELTA_C) - 2;
+
+  for (let n = nMin; n <= nMax; n++) {
+    const j0 = jBase;
+    const j1 = jBase + jRange;
+    const [x0, y0] = toCanvas(getVertex(n, j0).x, getVertex(n, j0).y, centerX, centerY, scale);
+    const [x1, y1] = toCanvas(getVertex(n, j1).x, getVertex(n, j1).y, centerX, centerY, scale);
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  }
+
+  // Family 2: lines along the n-axis direction (constant j)
+  for (let j = jBase; j <= jBase + jRange; j++) {
+    const [x0, y0] = toCanvas(getVertex(nMin, j).x, getVertex(nMin, j).y, centerX, centerY, scale);
+    const [x1, y1] = toCanvas(getVertex(nMax, j).x, getVertex(nMax, j).y, centerX, centerY, scale);
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  }
+
+  // Family 3: diagonal lines (constant n+j... actually n - j in the other direction)
+  // These connect (n, j) to (n+1, j-1) across the lattice
+  for (let s = nMin + jBase; s <= nMax + jBase + jRange; s++) {
+    // Line where n + j = s, i.e. j = s - n
+    // Endpoints: n = nMin, j = s - nMin and n = nMax, j = s - nMax
+    const [x0, y0] = toCanvas(getVertex(nMin, s - nMin).x, getVertex(nMin, s - nMin).y, centerX, centerY, scale);
+    const [x1, y1] = toCanvas(getVertex(nMax, s - nMax).x, getVertex(nMax, s - nMax).y, centerX, centerY, scale);
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  }
+}
+
+/**
+ * Draw the active region (triangles the user has selected).
+ * Black triangles are shown in light blue, white in light orange.
+ * Only shown when there's no valid tiling (otherwise lozenges cover them).
+ */
+function drawActiveTriangles() {
+  const { centerX, centerY, scale } = getTransform();
+
+  for (const tri of activeTriangles.values()) {
+    let verts;
+    if (tri.type === 1) {
+      verts = [getVertex(tri.n, tri.j), getVertex(tri.n, tri.j - 1), getVertex(tri.n + 1, tri.j - 1)];
+      ctx.fillStyle = 'rgba(100, 150, 220, 0.3)';
+    } else {
+      verts = [getVertex(tri.n, tri.j), getVertex(tri.n + 1, tri.j), getVertex(tri.n + 1, tri.j - 1)];
+      ctx.fillStyle = 'rgba(220, 160, 100, 0.3)';
+    }
+    const cv = verts.map(v => toCanvas(v.x, v.y, centerX, centerY, scale));
+    ctx.beginPath();
+    ctx.moveTo(cv[0][0], cv[0][1]);
+    ctx.lineTo(cv[1][0], cv[1][1]);
+    ctx.lineTo(cv[2][0], cv[2][1]);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+/**
+ * Draw the lozenge tiling.
+ * Each dimer is rendered as a filled rhombus in one of three colors.
+ */
+function drawLozenges(dimers) {
+  const { centerX, centerY, scale } = getTransform();
+  const outlineWidth = Math.max(0.3, 0.1 * (100 / Math.max(dimers.length, 1)));
+
+  for (const dimer of dimers) {
+    const verts = getLozengeVertices(dimer.bn, dimer.bj, dimer.t);
+    const cv = verts.map(v => toCanvas(v.x, v.y, centerX, centerY, scale));
+
+    ctx.fillStyle = LOZENGE_COLORS[dimer.t];
+    ctx.beginPath();
+    ctx.moveTo(cv[0][0], cv[0][1]);
+    for (let i = 1; i < cv.length; i++) ctx.lineTo(cv[i][0], cv[i][1]);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = outlineWidth;
+    ctx.stroke();
+  }
+}
+
+/**
+ * Draw the boundary of the region as a thick outline.
+ * We find boundary edges by counting: edges shared by two triangles are interior;
+ * edges appearing only once are on the boundary.
+ */
+function drawBoundary() {
+  const { centerX, centerY, scale } = getTransform();
+
+  // Collect all triangle edges with counts
+  const edgeCount = new Map();
+  function edgeKey(v1, v2) {
+    // Canonical ordering by coordinates
+    const a = v1.x < v2.x || (v1.x === v2.x && v1.y < v2.y) ? v1 : v2;
+    const b = a === v1 ? v2 : v1;
+    return `${a.x.toFixed(8)},${a.y.toFixed(8)},${b.x.toFixed(8)},${b.y.toFixed(8)}`;
+  }
+
+  for (const tri of activeTriangles.values()) {
+    let verts;
+    if (tri.type === 1) {
+      verts = [getVertex(tri.n, tri.j), getVertex(tri.n, tri.j - 1), getVertex(tri.n + 1, tri.j - 1)];
+    } else {
+      verts = [getVertex(tri.n, tri.j), getVertex(tri.n + 1, tri.j), getVertex(tri.n + 1, tri.j - 1)];
+    }
+    for (let i = 0; i < 3; i++) {
+      const key = edgeKey(verts[i], verts[(i + 1) % 3]);
+      edgeCount.set(key, (edgeCount.get(key) || 0) + 1);
+    }
+  }
+
+  // Draw edges that appear exactly once (boundary)
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = 'round';
+
+  for (const tri of activeTriangles.values()) {
+    let verts;
+    if (tri.type === 1) {
+      verts = [getVertex(tri.n, tri.j), getVertex(tri.n, tri.j - 1), getVertex(tri.n + 1, tri.j - 1)];
+    } else {
+      verts = [getVertex(tri.n, tri.j), getVertex(tri.n + 1, tri.j), getVertex(tri.n + 1, tri.j - 1)];
+    }
+    for (let i = 0; i < 3; i++) {
+      const key = edgeKey(verts[i], verts[(i + 1) % 3]);
+      if (edgeCount.get(key) === 1) {
+        const [x1, y1] = toCanvas(verts[i].x, verts[i].y, centerX, centerY, scale);
+        const [x2, y2] = toCanvas(verts[(i + 1) % 3].x, verts[(i + 1) % 3].y, centerX, centerY, scale);
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+/**
+ * Main draw function. Composites all layers.
+ */
+function draw() {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, displayWidth, displayHeight);
+
+  if (document.getElementById('show-grid').checked) {
+    drawGrid();
+  }
+
+  const dimers = exportDimers();
+
+  if (isValid && dimers.length > 0) {
+    if (document.getElementById('show-height').checked) {
+      drawHeightHeatmap(dimers);
+    }
+    drawLozenges(dimers);
+  } else {
+    drawActiveTriangles();
+  }
+
+  if (activeTriangles.size > 0) {
+    drawBoundary();
+  }
+}
+
+
+// ============================================================================
+// SECTION 9: HEIGHT FUNCTION
+//
+// A lozenge tiling defines a "height function" on the vertices of the
+// triangular lattice. Think of the tiling as a 3D stepped surface viewed
+// from above in isometric projection. The height at each vertex tells you
+// the elevation of the surface.
+//
+// To compute heights, we start from a boundary vertex (height 0) and
+// propagate via BFS. When crossing a dimer of type 0 (diagonal), the height
+// changes by +1 or -1 depending on direction. The height function is
+// well-defined because the tiling is a perfect matching.
+//
+// Height rules crossing from triangle to triangle:
+//   Crossing a covered edge (dimer): height changes by +1
+//   Crossing an uncovered edge:      height changes by -1
+// (with appropriate sign conventions)
+// ============================================================================
+
+/**
+ * Compute the height function via BFS from a boundary vertex.
+ * Returns a Map from "n,j" -> height value.
+ *
+ * The height function depends on the DIMER CONFIGURATION (not just the region).
+ * Different tilings of the same region produce different height functions.
+ *
+ * Convention (going counterclockwise around a triangle):
+ *   BLACK triangle: +1 on non-dimer edges, -2 on the dimer edge  (total: 0)
+ *   WHITE triangle: -1 on non-dimer edges, +2 on the dimer edge  (total: 0)
+ *
+ * This is well-defined because each edge's two adjacent triangles assign
+ * consistent (opposite-sign) height changes to the same edge.
+ */
+function computeHeightFunction(dimers) {
+  if (dimers.length === 0) return new Map();
+
+  // Build dimer lookup: for each black (n,j), its dimer type
+  const dimerLookup = new Map();
+  for (const d of dimers) {
+    dimerLookup.set(`${d.bn},${d.bj}`, d.t);
+  }
+
+  // For a white triangle L(n,j), determine which of its 3 edges carries a dimer.
+  // Returns 0 (diagonal), 1 (top), or 2 (right), or -1 if unmatched.
+  function getWhiteDimerEdge(wn, wj) {
+    if (dimerLookup.get(`${wn},${wj}`) === 0) return 0;       // Black(wn,wj) type 0
+    if (dimerLookup.get(`${wn},${wj + 1}`) === 1) return 1;   // Black(wn,wj+1) type 1
+    if (dimerLookup.get(`${wn + 1},${wj}`) === 2) return 2;   // Black(wn+1,wj) type 2
+    return -1;
+  }
+
+  const neighbors = new Map();
+  function addEdge(fromKey, toKey, delta) {
+    if (!neighbors.has(fromKey)) neighbors.set(fromKey, []);
+    neighbors.get(fromKey).push({ key: toKey, delta });
+  }
+
+  // Process BLACK triangles: R(bn,bj) has vertices CCW: (bn,bj)→(bn+1,bj-1)→(bn,bj-1)
+  // Edge 1: (bn,bj)→(bn+1,bj-1) = diagonal, dimer if type 0
+  // Edge 2: (bn+1,bj-1)→(bn,bj-1) = bottom, dimer if type 1
+  // Edge 3: (bn,bj-1)→(bn,bj) = left-vertical, dimer if type 2
+  for (const d of dimers) {
+    const t = d.t;
+    const v1 = `${d.bn},${d.bj}`;
+    const v2 = `${d.bn + 1},${d.bj - 1}`;
+    const v3 = `${d.bn},${d.bj - 1}`;
+
+    const d1 = (t === 0) ? -2 : 1;
+    const d2 = (t === 1) ? -2 : 1;
+    const d3 = (t === 2) ? -2 : 1;
+
+    addEdge(v1, v2, d1);  addEdge(v2, v1, -d1);
+    addEdge(v2, v3, d2);  addEdge(v3, v2, -d2);
+    addEdge(v3, v1, d3);  addEdge(v1, v3, -d3);
+  }
+
+  // Process WHITE triangles: L(wn,wj) has vertices CCW: (wn,wj)→(wn+1,wj)→(wn+1,wj-1)
+  // Edge 1: (wn,wj)→(wn+1,wj) = top, dimer if wType 1
+  // Edge 2: (wn+1,wj)→(wn+1,wj-1) = right, dimer if wType 2
+  // Edge 3: (wn+1,wj-1)→(wn,wj) = diagonal, dimer if wType 0
+  for (const wt of whiteTriangles) {
+    const wType = getWhiteDimerEdge(wt.n, wt.j);
+    if (wType === -1) continue;
+
+    const v1 = `${wt.n},${wt.j}`;
+    const v2 = `${wt.n + 1},${wt.j}`;
+    const v3 = `${wt.n + 1},${wt.j - 1}`;
+
+    const d1 = (wType === 1) ? 2 : -1;
+    const d2 = (wType === 2) ? 2 : -1;
+    const d3 = (wType === 0) ? 2 : -1;
+
+    addEdge(v1, v2, d1);  addEdge(v2, v1, -d1);
+    addEdge(v2, v3, d2);  addEdge(v3, v2, -d2);
+    addEdge(v3, v1, d3);  addEdge(v1, v3, -d3);
+  }
+
+  // BFS from a vertex of the first dimer
+  const heights = new Map();
+  const startKey = `${dimers[0].bn},${dimers[0].bj}`;
+  heights.set(startKey, 0);
+  const queue = [startKey];
+  let head = 0;
+
+  while (head < queue.length) {
+    const vk = queue[head++];
+    const h = heights.get(vk);
+    for (const { key, delta } of (neighbors.get(vk) || [])) {
+      if (!heights.has(key)) {
+        heights.set(key, h + delta);
+        queue.push(key);
+      }
+    }
+  }
+
+  return heights;
+}
+
+/**
+ * Draw the height function as a colored overlay.
+ * Uses a blue-white-red color map.
+ */
+function drawHeightHeatmap(dimers) {
+  const heights = computeHeightFunction(dimers);
+  if (heights.size === 0) return;
+
+  // Find min/max height
+  let minH = Infinity, maxH = -Infinity;
+  for (const h of heights.values()) {
+    minH = Math.min(minH, h);
+    maxH = Math.max(maxH, h);
+  }
+  const range = maxH - minH || 1;
+
+  const { centerX, centerY, scale } = getTransform();
+
+  for (const tri of activeTriangles.values()) {
+    let verts, vkeys;
+    if (tri.type === 1) {
+      verts = [getVertex(tri.n, tri.j), getVertex(tri.n, tri.j - 1), getVertex(tri.n + 1, tri.j - 1)];
+      vkeys = [`${tri.n},${tri.j}`, `${tri.n},${tri.j - 1}`, `${tri.n + 1},${tri.j - 1}`];
+    } else {
+      verts = [getVertex(tri.n, tri.j), getVertex(tri.n + 1, tri.j), getVertex(tri.n + 1, tri.j - 1)];
+      vkeys = [`${tri.n},${tri.j}`, `${tri.n + 1},${tri.j}`, `${tri.n + 1},${tri.j - 1}`];
+    }
+
+    // Average height of the 3 vertices
+    let sum = 0, count = 0;
+    for (const k of vkeys) {
+      if (heights.has(k)) { sum += heights.get(k); count++; }
+    }
+    if (count === 0) continue;
+    const avgH = sum / count;
+    const t = (avgH - minH) / range;
+
+    // Blue (low) -> White (mid) -> Red (high)
+    let r, g, b;
+    if (t < 0.5) {
+      const s = t * 2;
+      r = Math.round(50 + s * 205);
+      g = Math.round(50 + s * 205);
+      b = Math.round(200 + s * 55);
+    } else {
+      const s = (t - 0.5) * 2;
+      r = Math.round(255 - s * 55);
+      g = Math.round(255 - s * 205);
+      b = Math.round(255 - s * 205);
+    }
+
+    const cv = verts.map(v => toCanvas(v.x, v.y, centerX, centerY, scale));
+    ctx.fillStyle = `rgba(${r},${g},${b},0.4)`;
+    ctx.beginPath();
+    ctx.moveTo(cv[0][0], cv[0][1]);
+    ctx.lineTo(cv[1][0], cv[1][1]);
+    ctx.lineTo(cv[2][0], cv[2][1]);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+
+// ============================================================================
+// SECTION 10: UI CONTROLS & INTERACTION
+// ============================================================================
+
+let isValid = false;
+let isRunning = false;
+let currentTool = 'draw';  // 'draw' or 'erase'
+let animFrameId = null;
+
+/**
+ * Generate all triangles inside a polygon boundary on the lattice.
+ * For each candidate (n,j), check if the centroid of the black or white
+ * triangle at that position lies inside the polygon.
+ */
+function generateTrianglesInPolygon(boundary) {
+  const triangles = new Map();
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const v of boundary) {
+    minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x);
+    minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y);
+  }
+
+  const searchMinN = Math.floor(minX) - 2;
+  const searchMaxN = Math.ceil(maxX) + 2;
+  const nRange = searchMaxN - searchMinN;
+  const searchMinJ = Math.floor(minY / DELTA_C) - nRange - 5;
+  const searchMaxJ = Math.ceil(maxY / DELTA_C) + nRange + 5;
+
+  for (let n = searchMinN; n <= searchMaxN; n++) {
+    for (let j = searchMinJ; j <= searchMaxJ; j++) {
+      const rc = getRightTriangleCentroid(n, j);
+      if (pointInPolygon(rc.x, rc.y, boundary)) {
+        triangles.set(`${n},${j},1`, { n, j, type: 1 });
+      }
+      const lc = getLeftTriangleCentroid(n, j);
+      if (pointInPolygon(lc.x, lc.y, boundary)) {
+        triangles.set(`${n},${j},2`, { n, j, type: 2 });
+      }
+    }
+  }
+  return triangles;
+}
+
+/**
+ * Generate the hexagon with side lengths (a, b, c, a, b, c).
+ *
+ * The hexagon boundary is traced by walking along 6 directions on the
+ * triangular lattice. The 6 directions (in lattice coordinates) are:
+ *   (1,-1), (1,0), (0,1), (-1,1), (-1,0), (0,-1)
+ *
+ * These correspond to the 6 edges of a regular hexagon when mapped to
+ * Cartesian coordinates via getVertex().
+ */
+function generateHexagon(a, b, c) {
+  const directions = [[1, -1], [1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1]];
+  const sideLengths = [a, b, c, a, b, c];
+
+  const boundary = [];
+  let n = 0, j = 0;
+
+  for (let dir = 0; dir < 6; dir++) {
+    const [dn, dj] = directions[dir];
+    for (let step = 0; step < sideLengths[dir]; step++) {
+      boundary.push(getVertex(n, j));
+      n += dn;
+      j += dj;
+    }
+  }
+
+  return generateTrianglesInPolygon(boundary);
+}
+
+/**
+ * Reinitialize the tiling after region changes.
+ * Rebuilds the grid, runs Dinic's matching, collects vertices.
+ */
+function reinitialize() {
+  stopGlauber();
+
+  if (activeTriangles.size === 0) {
+    isValid = false;
+    blackTriangles = [];
+    whiteTriangles = [];
+    latticeVertices = [];
+    updateStatusBadge();
+    draw();
+    return;
+  }
+
+  buildGridFromTriangles();
+  isValid = findInitialMatching();
+
+  if (isValid) {
+    collectVertices();
+    totalSteps = 0;
+    flipCount = 0;
+  }
+
+  updateStatusBadge();
+  draw();
+}
+
+function updateStatusBadge() {
+  const badge = document.getElementById('status-badge');
+  const btn = document.getElementById('btn-start-stop');
+  if (activeTriangles.size === 0) {
+    badge.textContent = 'Empty';
+    badge.className = '';
+    btn.disabled = true;
+  } else if (isValid) {
+    badge.textContent = `Tileable (${blackTriangles.length} + ${whiteTriangles.length})`;
+    badge.className = 'tileable';
+    btn.disabled = false;
+  } else {
+    badge.textContent = `Not tileable (${blackTriangles.length}B / ${whiteTriangles.length}W)`;
+    badge.className = 'invalid';
+    btn.disabled = true;
+  }
+}
+
+function updateStats() {
+  document.getElementById('stats').textContent =
+    `Steps: ${totalSteps.toLocaleString()} | Flips: ${flipCount.toLocaleString()}`;
+}
+
+// --- Glauber animation loop ---
+
+function startGlauber() {
+  if (!isValid || isRunning) return;
+  isRunning = true;
+  document.getElementById('btn-start-stop').textContent = 'Stop';
+  document.getElementById('btn-start-stop').classList.add('active');
+  animationLoop();
+}
+
+function stopGlauber() {
+  isRunning = false;
+  if (animFrameId) cancelAnimationFrame(animFrameId);
+  animFrameId = null;
+  document.getElementById('btn-start-stop').textContent = 'Start';
+  document.getElementById('btn-start-stop').classList.remove('active');
+}
+
+function animationLoop() {
+  if (!isRunning) return;
+
+  const stepsPerFrame = parseInt(document.getElementById('speed-slider').value);
+  const q = parseFloat(document.getElementById('q-input').value) || 1;
+
+  glauberSteps(stepsPerFrame, q);
+  draw();
+  updateStats();
+
+  animFrameId = requestAnimationFrame(animationLoop);
+}
+
+// --- Mouse / touch interaction ---
+
+let isPanning = false;
+let isDrawing = false;
+let lastMouseX = 0, lastMouseY = 0;
+let drawDirty = false;
+
+canvas.addEventListener('mousedown', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  // Right-click or Ctrl+click: start panning
+  if (e.button === 2 || e.ctrlKey || e.metaKey) {
+    isPanning = true;
+    lastMouseX = mx;
+    lastMouseY = my;
+    e.preventDefault();
+    return;
+  }
+
+  // Left-click: draw/erase
+  if (e.button === 0) {
+    isDrawing = true;
+    drawDirty = false;
+    handleDrawAt(mx, my);
+  }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  if (isPanning) {
+    const { scale } = getTransform();
+    panX -= (mx - lastMouseX) / scale;
+    panY += (my - lastMouseY) / scale;
+    lastMouseX = mx;
+    lastMouseY = my;
+    draw();
+    return;
+  }
+
+  if (isDrawing) {
+    handleDrawAt(mx, my);
+  }
+});
+
+canvas.addEventListener('mouseup', () => {
+  if (isDrawing && drawDirty) {
+    reinitialize();
+  }
+  isPanning = false;
+  isDrawing = false;
+});
+
+canvas.addEventListener('mouseleave', () => {
+  if (isDrawing && drawDirty) {
+    reinitialize();
+  }
+  isPanning = false;
+  isDrawing = false;
+});
+
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const factor = e.deltaY > 0 ? 0.9 : 1.1;
+  zoomAt(mx, my, factor);
+  draw();
+}, { passive: false });
+
+function handleDrawAt(mx, my) {
+  const { centerX, centerY, scale } = getTransform();
+  const world = fromCanvas(mx, my, centerX, centerY, scale);
+  const tri = getTriangleFromWorld(world.x, world.y);
+  if (!tri) return;
+
+  const key = `${tri.n},${tri.j},${tri.type}`;
+
+  if (currentTool === 'draw') {
+    if (!activeTriangles.has(key)) {
+      activeTriangles.set(key, tri);
+      drawDirty = true;
+      draw(); // visual feedback while drawing
+    }
+  } else {
+    if (activeTriangles.has(key)) {
+      activeTriangles.delete(key);
+      drawDirty = true;
+      draw();
+    }
+  }
+}
+
+// --- Touch support ---
+
+let touchId = null;
+canvas.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 1) {
+    const t = e.touches[0];
+    touchId = t.identifier;
+    const rect = canvas.getBoundingClientRect();
+    const mx = t.clientX - rect.left;
+    const my = t.clientY - rect.top;
+    isDrawing = true;
+    drawDirty = false;
+    handleDrawAt(mx, my);
+    e.preventDefault();
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  for (const t of e.changedTouches) {
+    if (t.identifier === touchId) {
+      const rect = canvas.getBoundingClientRect();
+      handleDrawAt(t.clientX - rect.left, t.clientY - rect.top);
+    }
+  }
+  e.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  for (const t of e.changedTouches) {
+    if (t.identifier === touchId) {
+      if (drawDirty) reinitialize();
+      isDrawing = false;
+      touchId = null;
+    }
+  }
+});
+
+// --- Button handlers ---
+
+document.getElementById('btn-draw').addEventListener('click', () => {
+  currentTool = 'draw';
+  document.getElementById('btn-draw').classList.add('active');
+  document.getElementById('btn-erase').classList.remove('active');
+});
+
+document.getElementById('btn-erase').addEventListener('click', () => {
+  currentTool = 'erase';
+  document.getElementById('btn-erase').classList.add('active');
+  document.getElementById('btn-draw').classList.remove('active');
+});
+
+document.getElementById('btn-clear').addEventListener('click', () => {
+  activeTriangles = new Map();
+  reinitialize();
+});
+
+document.getElementById('btn-hexagon').addEventListener('click', () => {
+  const a = parseInt(document.getElementById('hex-a').value) || 5;
+  const b = parseInt(document.getElementById('hex-b').value) || 5;
+  const c = parseInt(document.getElementById('hex-c').value) || 5;
+  activeTriangles = generateHexagon(a, b, c);
+  reinitialize();
+  fitToRegion();
+  draw();
+});
+
+document.getElementById('btn-start-stop').addEventListener('click', () => {
+  if (isRunning) stopGlauber();
+  else startGlauber();
+});
+
+document.getElementById('speed-slider').addEventListener('input', (e) => {
+  document.getElementById('speed-label').textContent = e.target.value;
+});
+
+document.getElementById('show-grid').addEventListener('change', () => draw());
+document.getElementById('show-height').addEventListener('change', () => draw());
+
+document.getElementById('btn-export').addEventListener('click', () => {
+  const link = document.createElement('a');
+  link.download = 'lozenge-tiling.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+});
+
+// --- Resize handling ---
+
+window.addEventListener('resize', () => {
+  setupCanvas();
+  draw();
+});
+
+
+// ============================================================================
+// SECTION 11: INITIALIZATION
+// ============================================================================
+
+setupCanvas();
+
+// Create a default hexagon(5, 5, 5) to start with
+activeTriangles = generateHexagon(5, 5, 5);
+reinitialize();
+fitToRegion();
+draw();
+
+</script>
+</body>
+</html>
