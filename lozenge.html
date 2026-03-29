@@ -166,7 +166,7 @@
       <div class="control-section">
         <h3>View</h3>
         <label><input id="show-grid" type="checkbox" checked> Show grid</label>
-        <label><input id="show-height" type="checkbox"> Height heatmap</label>
+        <label><input id="show-dimers" type="checkbox"> Dimer view</label>
         <button id="btn-export">Export PNG</button>
       </div>
     </div>
@@ -181,45 +181,52 @@
 // triangular lattice. Lozenges (rhombi) are dimers on the triangular lattice,
 // equivalently perfect matchings of the dual hexagonal lattice.
 //
-// The code is organized into clearly-labeled sections:
-//   Section 3:  Lattice Geometry
-//   Section 4:  Region & Grid Data Structures
-//   Section 5:  Dimer Storage & Manipulation
-//   Section 6:  Dinic's Max-Flow (Initial Matching)
-//   Section 7:  Glauber Dynamics (MCMC Sampling)
-//   Section 8:  Canvas Renderer
-//   Section 9:  Height Function
-//   Section 10: UI Controls & Interaction
-//   Section 11: Initialization
+// HOW TO READ THIS CODE:
+// The code is split into numbered sections. Each section begins with a comment
+// block explaining the math and the purpose. You can read them in order:
+//
+//   1. Lattice Geometry        - coordinate system and triangle math
+//   2. Region & Grid           - how we store the user's region and dimers
+//   3. Dimer Manipulation      - operations on individual dimers
+//   4. Dinic's Max-Flow        - finding an initial tiling (graph algorithm)
+//   5. Glauber Dynamics        - random sampling via MCMC
+//   6. Canvas Renderer         - drawing everything on screen
+//   7. UI Controls             - buttons, mouse, keyboard
+//   8. Initialization          - startup code
 // ============================================================================
 
 'use strict';
 
 // ============================================================================
-// SECTION 3: LATTICE GEOMETRY
+// SECTION 1: LATTICE GEOMETRY
 //
 // The triangular lattice tiles the plane with equilateral triangles.
-// We use oblique coordinates (n, j) where:
+// We use oblique coordinates (n, j) to label the lattice vertices:
 //
-//   Cartesian x = n
-//   Cartesian y = (1/sqrt(3)) * n  +  (2/sqrt(3)) * j
+//        (0,2)----(1,2)
+//        / \      / \
+//      /     \  /     \
+//   (0,1)----(1,1)----(2,1)       Coordinate system:
+//    / \      / \      / \         - n increases to the right
+//  /     \  /     \  /     \       - j increases upward
+// (0,0)----(1,0)----(2,0)----(3,0)
 //
-// This means:
-//   - Increasing n moves right along x and slightly up (slope 1/sqrt(3))
-//   - Increasing j moves up by 2/sqrt(3)
+// To convert (n, j) to Cartesian (x, y) for drawing:
+//   x = n
+//   y = (1/sqrt(3)) * n  +  (2/sqrt(3)) * j
 //
-// The lattice is BIPARTITE: triangles alternate between two colors.
-//   - BLACK (right-pointing, type 1): vertices (n,j), (n,j-1), (n+1,j-1)
-//   - WHITE (left-pointing, type 2):  vertices (n,j), (n+1,j), (n+1,j-1)
+// The lattice is BIPARTITE: triangles come in two types.
+//   BLACK (right-pointing ▶, type 1): vertices (n,j), (n,j-1), (n+1,j-1)
+//   WHITE (left-pointing ◀, type 2):  vertices (n,j), (n+1,j), (n+1,j-1)
 //
-// A lozenge (dimer) pairs one black triangle with one adjacent white triangle.
-// There are exactly 3 ways to pair Black(n,j) with a neighbor:
-//   Type 0 (diagonal):      White(n,j)    - shares edge (n,j)-(n+1,j-1)
-//   Type 1 (bottom):        White(n,j-1)  - shares edge (n,j-1)-(n+1,j-1... wait)
-//   Type 2 (left-vertical): White(n-1,j)  - shares edge (n,j)-(n,j-1)
+// A "lozenge" (rhombus) is formed by gluing one black and one adjacent white
+// triangle together. There are exactly 3 ways to pair Black(n,j):
+//   Type 0 (diagonal):      with White(n,j)    → a horizontal-ish rhombus
+//   Type 1 (bottom):        with White(n,j-1)  → a rhombus pointing down-right
+//   Type 2 (left-vertical): with White(n-1,j)  → a vertical-ish rhombus
 //
-// Visually, the three lozenge types look like the three visible faces of a
-// unit cube in isometric projection (top, front-right, front-left).
+// Visually, the three lozenge orientations look like the three visible faces
+// of a unit cube drawn in isometric (3D) projection.
 // ============================================================================
 
 const SLOPE = 1 / Math.sqrt(3);    // = tan(30 degrees)
@@ -344,7 +351,7 @@ function getTriangleFromWorld(x, y) {
 
 
 // ============================================================================
-// SECTION 4: REGION & GRID DATA STRUCTURES
+// SECTION 2: REGION & GRID DATA STRUCTURES
 //
 // We maintain two representations of the tiling state:
 //
@@ -427,7 +434,7 @@ function buildGridFromTriangles() {
 
 
 // ============================================================================
-// SECTION 5: DIMER STORAGE & MANIPULATION
+// SECTION 3: DIMER STORAGE & MANIPULATION
 //
 // A dimer (perfect matching edge) connects one black triangle to one adjacent
 // white triangle. On the hexagonal dual lattice, each vertex has degree 3,
@@ -524,7 +531,7 @@ function exportDimers() {
 
 
 // ============================================================================
-// SECTION 6: DINIC'S MAX-FLOW FOR INITIAL PERFECT MATCHING
+// SECTION 4: DINIC'S MAX-FLOW FOR INITIAL PERFECT MATCHING
 //
 // To find an initial lozenge tiling of a user-drawn region, we need a
 // perfect matching in the bipartite graph of adjacent black/white triangles.
@@ -700,7 +707,7 @@ function findInitialMatching() {
 
 
 // ============================================================================
-// SECTION 7: GLAUBER DYNAMICS (MCMC SAMPLING)
+// SECTION 5: GLAUBER DYNAMICS (MCMC SAMPLING)
 //
 // Glauber dynamics is a Markov Chain Monte Carlo (MCMC) method that generates
 // random lozenge tilings. Starting from any valid tiling, it makes random
@@ -881,7 +888,7 @@ function glauberSteps(numSteps, q) {
 
 
 // ============================================================================
-// SECTION 8: CANVAS RENDERER
+// SECTION 6: CANVAS RENDERER
 //
 // Draws the triangular lattice, the user's region, and the lozenge tiling
 // onto an HTML5 Canvas using the 2D rendering context.
@@ -970,8 +977,8 @@ function fitToRegion() {
   const baseScale = Math.min(displayWidth, displayHeight) / baseViewSize;
   const fitZoom = Math.min(displayWidth / (worldW * baseScale), displayHeight / (worldH * baseScale));
   zoom = fitZoom * 0.85; // 85% to leave margin
-  panX = -(minX + maxX) / 2;
-  panY = -(minY + maxY) / 2;
+  panX = (minX + maxX) / 2;
+  panY = (minY + maxY) / 2;
 }
 
 /**
@@ -1077,6 +1084,43 @@ function drawLozenges(dimers) {
 }
 
 /**
+ * Draw the dimer (matching) view.
+ * Instead of filled lozenges, this shows:
+ *   - Each triangle colored by its type (light blue / light orange)
+ *   - A thick line connecting the centroids of each matched pair
+ *
+ * This is the "graph theory" view: the triangular lattice is the graph,
+ * and each dimer is an edge of the perfect matching.
+ */
+function drawDimerView(dimers) {
+  const { centerX, centerY, scale } = getTransform();
+
+  // First, draw all triangles with bipartite coloring
+  drawActiveTriangles();
+
+  // Then draw dimer edges as thick lines between matched triangle centroids
+  ctx.strokeStyle = '#c0392b';
+  ctx.lineWidth = Math.max(2, scale * 0.08);
+  ctx.lineCap = 'round';
+
+  for (const dimer of dimers) {
+    // Centroid of the black triangle
+    const bc = getRightTriangleCentroid(dimer.bn, dimer.bj);
+    // Centroid of the white triangle
+    const w = getWhiteFromType(dimer.bn, dimer.bj, dimer.t);
+    const wc = getLeftTriangleCentroid(w.n, w.j);
+
+    const [bx, by] = toCanvas(bc.x, bc.y, centerX, centerY, scale);
+    const [wx, wy] = toCanvas(wc.x, wc.y, centerX, centerY, scale);
+
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(wx, wy);
+    ctx.stroke();
+  }
+}
+
+/**
  * Draw the boundary of the region as a thick outline.
  * We find boundary edges by counting: edges shared by two triangles are interior;
  * edges appearing only once are on the boundary.
@@ -1146,10 +1190,11 @@ function draw() {
   const dimers = exportDimers();
 
   if (isValid && dimers.length > 0) {
-    if (document.getElementById('show-height').checked) {
-      drawHeightHeatmap(dimers);
+    if (document.getElementById('show-dimers').checked) {
+      drawDimerView(dimers);
+    } else {
+      drawLozenges(dimers);
     }
-    drawLozenges(dimers);
   } else {
     drawActiveTriangles();
   }
@@ -1161,188 +1206,9 @@ function draw() {
 
 
 // ============================================================================
-// SECTION 9: HEIGHT FUNCTION
-//
-// A lozenge tiling defines a "height function" on the vertices of the
-// triangular lattice. Think of the tiling as a 3D stepped surface viewed
-// from above in isometric projection. The height at each vertex tells you
-// the elevation of the surface.
-//
-// To compute heights, we start from a boundary vertex (height 0) and
-// propagate via BFS. When crossing a dimer of type 0 (diagonal), the height
-// changes by +1 or -1 depending on direction. The height function is
-// well-defined because the tiling is a perfect matching.
-//
-// Height rules crossing from triangle to triangle:
-//   Crossing a covered edge (dimer): height changes by +1
-//   Crossing an uncovered edge:      height changes by -1
-// (with appropriate sign conventions)
-// ============================================================================
-
-/**
- * Compute the height function via BFS from a boundary vertex.
- * Returns a Map from "n,j" -> height value.
- *
- * The height function depends on the DIMER CONFIGURATION (not just the region).
- * Different tilings of the same region produce different height functions.
- *
- * Convention (going counterclockwise around a triangle):
- *   BLACK triangle: +1 on non-dimer edges, -2 on the dimer edge  (total: 0)
- *   WHITE triangle: -1 on non-dimer edges, +2 on the dimer edge  (total: 0)
- *
- * This is well-defined because each edge's two adjacent triangles assign
- * consistent (opposite-sign) height changes to the same edge.
- */
-function computeHeightFunction(dimers) {
-  if (dimers.length === 0) return new Map();
-
-  // Build dimer lookup: for each black (n,j), its dimer type
-  const dimerLookup = new Map();
-  for (const d of dimers) {
-    dimerLookup.set(`${d.bn},${d.bj}`, d.t);
-  }
-
-  // For a white triangle L(n,j), determine which of its 3 edges carries a dimer.
-  // Returns 0 (diagonal), 1 (top), or 2 (right), or -1 if unmatched.
-  function getWhiteDimerEdge(wn, wj) {
-    if (dimerLookup.get(`${wn},${wj}`) === 0) return 0;       // Black(wn,wj) type 0
-    if (dimerLookup.get(`${wn},${wj + 1}`) === 1) return 1;   // Black(wn,wj+1) type 1
-    if (dimerLookup.get(`${wn + 1},${wj}`) === 2) return 2;   // Black(wn+1,wj) type 2
-    return -1;
-  }
-
-  const neighbors = new Map();
-  function addEdge(fromKey, toKey, delta) {
-    if (!neighbors.has(fromKey)) neighbors.set(fromKey, []);
-    neighbors.get(fromKey).push({ key: toKey, delta });
-  }
-
-  // Process BLACK triangles: R(bn,bj) has vertices CCW: (bn,bj)→(bn+1,bj-1)→(bn,bj-1)
-  // Edge 1: (bn,bj)→(bn+1,bj-1) = diagonal, dimer if type 0
-  // Edge 2: (bn+1,bj-1)→(bn,bj-1) = bottom, dimer if type 1
-  // Edge 3: (bn,bj-1)→(bn,bj) = left-vertical, dimer if type 2
-  for (const d of dimers) {
-    const t = d.t;
-    const v1 = `${d.bn},${d.bj}`;
-    const v2 = `${d.bn + 1},${d.bj - 1}`;
-    const v3 = `${d.bn},${d.bj - 1}`;
-
-    const d1 = (t === 0) ? -2 : 1;
-    const d2 = (t === 1) ? -2 : 1;
-    const d3 = (t === 2) ? -2 : 1;
-
-    addEdge(v1, v2, d1);  addEdge(v2, v1, -d1);
-    addEdge(v2, v3, d2);  addEdge(v3, v2, -d2);
-    addEdge(v3, v1, d3);  addEdge(v1, v3, -d3);
-  }
-
-  // Process WHITE triangles: L(wn,wj) has vertices CCW: (wn,wj)→(wn+1,wj)→(wn+1,wj-1)
-  // Edge 1: (wn,wj)→(wn+1,wj) = top, dimer if wType 1
-  // Edge 2: (wn+1,wj)→(wn+1,wj-1) = right, dimer if wType 2
-  // Edge 3: (wn+1,wj-1)→(wn,wj) = diagonal, dimer if wType 0
-  for (const wt of whiteTriangles) {
-    const wType = getWhiteDimerEdge(wt.n, wt.j);
-    if (wType === -1) continue;
-
-    const v1 = `${wt.n},${wt.j}`;
-    const v2 = `${wt.n + 1},${wt.j}`;
-    const v3 = `${wt.n + 1},${wt.j - 1}`;
-
-    const d1 = (wType === 1) ? 2 : -1;
-    const d2 = (wType === 2) ? 2 : -1;
-    const d3 = (wType === 0) ? 2 : -1;
-
-    addEdge(v1, v2, d1);  addEdge(v2, v1, -d1);
-    addEdge(v2, v3, d2);  addEdge(v3, v2, -d2);
-    addEdge(v3, v1, d3);  addEdge(v1, v3, -d3);
-  }
-
-  // BFS from a vertex of the first dimer
-  const heights = new Map();
-  const startKey = `${dimers[0].bn},${dimers[0].bj}`;
-  heights.set(startKey, 0);
-  const queue = [startKey];
-  let head = 0;
-
-  while (head < queue.length) {
-    const vk = queue[head++];
-    const h = heights.get(vk);
-    for (const { key, delta } of (neighbors.get(vk) || [])) {
-      if (!heights.has(key)) {
-        heights.set(key, h + delta);
-        queue.push(key);
-      }
-    }
-  }
-
-  return heights;
-}
-
-/**
- * Draw the height function as a colored overlay.
- * Uses a blue-white-red color map.
- */
-function drawHeightHeatmap(dimers) {
-  const heights = computeHeightFunction(dimers);
-  if (heights.size === 0) return;
-
-  // Find min/max height
-  let minH = Infinity, maxH = -Infinity;
-  for (const h of heights.values()) {
-    minH = Math.min(minH, h);
-    maxH = Math.max(maxH, h);
-  }
-  const range = maxH - minH || 1;
-
-  const { centerX, centerY, scale } = getTransform();
-
-  for (const tri of activeTriangles.values()) {
-    let verts, vkeys;
-    if (tri.type === 1) {
-      verts = [getVertex(tri.n, tri.j), getVertex(tri.n, tri.j - 1), getVertex(tri.n + 1, tri.j - 1)];
-      vkeys = [`${tri.n},${tri.j}`, `${tri.n},${tri.j - 1}`, `${tri.n + 1},${tri.j - 1}`];
-    } else {
-      verts = [getVertex(tri.n, tri.j), getVertex(tri.n + 1, tri.j), getVertex(tri.n + 1, tri.j - 1)];
-      vkeys = [`${tri.n},${tri.j}`, `${tri.n + 1},${tri.j}`, `${tri.n + 1},${tri.j - 1}`];
-    }
-
-    // Average height of the 3 vertices
-    let sum = 0, count = 0;
-    for (const k of vkeys) {
-      if (heights.has(k)) { sum += heights.get(k); count++; }
-    }
-    if (count === 0) continue;
-    const avgH = sum / count;
-    const t = (avgH - minH) / range;
-
-    // Blue (low) -> White (mid) -> Red (high)
-    let r, g, b;
-    if (t < 0.5) {
-      const s = t * 2;
-      r = Math.round(50 + s * 205);
-      g = Math.round(50 + s * 205);
-      b = Math.round(200 + s * 55);
-    } else {
-      const s = (t - 0.5) * 2;
-      r = Math.round(255 - s * 55);
-      g = Math.round(255 - s * 205);
-      b = Math.round(255 - s * 205);
-    }
-
-    const cv = verts.map(v => toCanvas(v.x, v.y, centerX, centerY, scale));
-    ctx.fillStyle = `rgba(${r},${g},${b},0.4)`;
-    ctx.beginPath();
-    ctx.moveTo(cv[0][0], cv[0][1]);
-    ctx.lineTo(cv[1][0], cv[1][1]);
-    ctx.lineTo(cv[2][0], cv[2][1]);
-    ctx.closePath();
-    ctx.fill();
-  }
-}
-
 
 // ============================================================================
-// SECTION 10: UI CONTROLS & INTERACTION
+// SECTION 7: UI CONTROLS & INTERACTION
 // ============================================================================
 
 let isValid = false;
@@ -1673,7 +1539,7 @@ document.getElementById('speed-slider').addEventListener('input', (e) => {
 });
 
 document.getElementById('show-grid').addEventListener('change', () => draw());
-document.getElementById('show-height').addEventListener('change', () => draw());
+document.getElementById('show-dimers').addEventListener('change', () => draw());
 
 document.getElementById('btn-export').addEventListener('click', () => {
   const link = document.createElement('a');
@@ -1691,7 +1557,7 @@ window.addEventListener('resize', () => {
 
 
 // ============================================================================
-// SECTION 11: INITIALIZATION
+// SECTION 8: INITIALIZATION
 // ============================================================================
 
 setupCanvas();
