@@ -1085,28 +1085,51 @@ function drawLozenges(dimers) {
 
 /**
  * Draw the dimer (matching) view.
- * Instead of filled lozenges, this shows:
- *   - Each triangle colored by its type (light blue / light orange)
- *   - A thick line connecting the centroids of each matched pair
- *
- * This is the "graph theory" view: the triangular lattice is the graph,
- * and each dimer is an edge of the perfect matching.
+ * Shows the hexagonal dual lattice: vertices are triangle centroids
+ * (black dots for black/right triangles, white dots for white/left triangles),
+ * edges connect adjacent triangles, and dimer edges are highlighted in red.
  */
 function drawDimerView(dimers) {
   const { centerX, centerY, scale } = getTransform();
+  const vertexRadius = Math.max(2.5, scale * 0.07);
 
-  // First, draw all triangles with bipartite coloring
-  drawActiveTriangles();
+  // --- Draw hexagonal dual edges (connect centroids of adjacent triangles) ---
+  ctx.strokeStyle = '#bbb';
+  ctx.lineWidth = Math.max(0.5, scale * 0.02);
+  ctx.lineCap = 'round';
 
-  // Then draw dimer edges as thick lines between matched triangle centroids
+  // For each black triangle, draw edges to its 3 adjacent white triangles
+  // (if both are in the active region). This covers every dual edge exactly once.
+  for (const tri of activeTriangles.values()) {
+    if (tri.type !== 1) continue; // only iterate black triangles
+    const bc = getRightTriangleCentroid(tri.n, tri.j);
+    const [bx, by] = toCanvas(bc.x, bc.y, centerX, centerY, scale);
+
+    // 3 adjacent whites: L(n,j) [type 0], L(n,j-1) [type 1], L(n-1,j) [type 2]
+    const neighbors = [
+      { n: tri.n, j: tri.j },
+      { n: tri.n, j: tri.j - 1 },
+      { n: tri.n - 1, j: tri.j }
+    ];
+    for (const nb of neighbors) {
+      const wKey = `${nb.n},${nb.j},2`;
+      if (!activeTriangles.has(wKey)) continue;
+      const wc = getLeftTriangleCentroid(nb.n, nb.j);
+      const [wx, wy] = toCanvas(wc.x, wc.y, centerX, centerY, scale);
+      ctx.beginPath();
+      ctx.moveTo(bx, by);
+      ctx.lineTo(wx, wy);
+      ctx.stroke();
+    }
+  }
+
+  // --- Draw dimer edges (thick red) ---
   ctx.strokeStyle = '#c0392b';
-  ctx.lineWidth = Math.max(2, scale * 0.08);
+  ctx.lineWidth = Math.max(4, scale * 0.16);
   ctx.lineCap = 'round';
 
   for (const dimer of dimers) {
-    // Centroid of the black triangle
     const bc = getRightTriangleCentroid(dimer.bn, dimer.bj);
-    // Centroid of the white triangle
     const w = getWhiteFromType(dimer.bn, dimer.bj, dimer.t);
     const wc = getLeftTriangleCentroid(w.n, w.j);
 
@@ -1116,6 +1139,26 @@ function drawDimerView(dimers) {
     ctx.beginPath();
     ctx.moveTo(bx, by);
     ctx.lineTo(wx, wy);
+    ctx.stroke();
+  }
+
+  // --- Draw vertices (black dots for black triangles, white dots for white) ---
+  for (const tri of activeTriangles.values()) {
+    let cx, cy;
+    if (tri.type === 1) {
+      const c = getRightTriangleCentroid(tri.n, tri.j);
+      [cx, cy] = toCanvas(c.x, c.y, centerX, centerY, scale);
+      ctx.fillStyle = '#222';
+    } else {
+      const c = getLeftTriangleCentroid(tri.n, tri.j);
+      [cx, cy] = toCanvas(c.x, c.y, centerX, centerY, scale);
+      ctx.fillStyle = '#fff';
+    }
+    ctx.beginPath();
+    ctx.arc(cx, cy, vertexRadius, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = Math.max(0.8, scale * 0.02);
     ctx.stroke();
   }
 }
