@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lattice Creator - Interactive Explorer</title>
+  <style>
+    /* ========================================================================
+       SECTION 1: CSS STYLES
+       ======================================================================== */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: Georgia, 'Times New Roman', serif;
+      background: #fafafa;
+      color: #2c2c2c;
+      overflow: hidden;
+      height: 100vh;
+    }
+    #app {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      height: 100vh;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 8px 16px;
+      border-bottom: 1px solid #ccc;
+      background: #fff;
+    }
+    header h1 {
+      font-size: 1.2rem;
+      font-weight: normal;
+    }
+    #status-badge {
+      font-size: 0.8rem;
+      padding: 2px 10px;
+      border-radius: 10px;
+      background: #ccc;
+      color: #fff;
+    }
+    #status-badge.tileable { background: #2a7; }
+    #status-badge.invalid { background: #c44; }
+    #main-layout {
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      overflow: hidden;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: crosshair;
+    }
+    #controls {
+      padding: 12px;
+      overflow-y: auto;
+      border-left: 1px solid #ccc;
+      background: #fff;
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 0.85rem;
+    }
+    .control-section {
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #eee;
+    }
+    .control-section h3 {
+      font-size: 0.9rem;
+      margin-bottom: 6px;
+      color: #555;
+    }
+    .control-section input[type="number"] {
+      width: 56px;
+      padding: 2px 4px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+    }
+    .control-section select {
+      padding: 2px 4px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      background: #fff;
+      font-size: 0.8rem;
+    }
+    .control-section label {
+      display: block;
+      margin: 4px 0;
+      font-size: 0.8rem;
+    }
+    button {
+      padding: 4px 10px;
+      margin: 2px;
+      border: 1px solid #999;
+      border-radius: 3px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    button:hover { background: #f0f0f0; }
+    button.active {
+      background: #232D4B;
+      color: #fff;
+      border-color: #232D4B;
+    }
+    #stats {
+      font-size: 0.75rem;
+      color: #555;
+      margin-top: 6px;
+      line-height: 1.5;
+    }
+    .help {
+      font-size: 0.75rem;
+      color: #888;
+      line-height: 1.4;
+      margin-top: 4px;
+    }
+    .row { display: flex; gap: 4px; align-items: center; margin: 4px 0; flex-wrap: wrap; }
+    @media (max-width: 700px) {
+      #main-layout { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+      #controls { max-height: 40vh; border-left: none; border-top: 1px solid #ccc; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ========================================================================
+     SECTION 2: HTML STRUCTURE
+     ======================================================================== -->
+<div id="app">
+  <header>
+    <h1>Lattice Creator</h1>
+    <span id="status-badge">Empty</span>
+    <span style="flex:1"></span>
+    <a href="index.html" style="font-size:0.85rem; color:#1a5276;">Back</a>
+  </header>
+  <div id="main-layout">
+    <canvas id="canvas"></canvas>
+    <div id="controls">
+      <div class="control-section">
+        <h3>Tools</h3>
+        <div class="row">
+          <button id="btn-add-black" class="active">Add Black</button>
+          <button id="btn-add-white">Add White</button>
+        </div>
+        <div class="row">
+          <button id="btn-erase">Erase</button>
+          <button id="btn-clear">Clear All</button>
+        </div>
+        <p class="help">
+          Click inside the bold square to place dots. The computer draws a
+          bipartite planar graph automatically. Edges that wrap across the
+          cell boundary get mirrored into the neighboring copies.
+        </p>
+      </div>
+      <div class="control-section">
+        <h3>Region Shape</h3>
+        <label>
+          Shape:
+          <select id="shape-select">
+            <option value="square" selected>Square (n x n)</option>
+            <option value="rectangle">Rectangle (w x h)</option>
+            <option value="diamond">Diamond (radius r)</option>
+            <option value="custom">Custom</option>
+          </select>
+        </label>
+        <div class="row" id="row-square">
+          <label>n: <input id="size-n" type="number" value="3" min="1" max="12"></label>
+        </div>
+        <div class="row" id="row-rectangle" style="display:none;">
+          <label>w: <input id="size-w" type="number" value="4" min="1" max="12"></label>
+          <label>h: <input id="size-h" type="number" value="3" min="1" max="12"></label>
+        </div>
+        <div class="row" id="row-diamond" style="display:none;">
+          <label>r: <input id="size-r" type="number" value="2" min="0" max="8"></label>
+        </div>
+        <div class="row">
+          <button id="btn-draw-region">Draw Region</button>
+        </div>
+        <p class="help">
+          Pick a preset, or click <b>Draw Region</b> to add/remove cells by
+          clicking. Click <b>Fix Region</b> when done. The bold cell is the
+          fundamental cell and cannot be removed.
+        </p>
+      </div>
+      <div class="control-section">
+        <h3>Info</h3>
+        <div id="stats">
+          Dots: 0 B / 0 W<br>
+          Pairs: 0 / 8<br>
+          Edges: 0
+        </div>
+      </div>
+      <div class="control-section">
+        <h3>Export</h3>
+        <div class="row">
+          <button id="btn-export-png">Export PNG</button>
+          <button id="btn-export-json">Export JSON</button>
+        </div>
+      </div>
+      <div class="control-section">
+        <h3>Navigation</h3>
+        <p class="help">
+          Ctrl+drag or right-drag to pan. Scroll to zoom.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================================
+// LATTICE CREATOR
+//
+// A self-contained, student-readable tool for designing periodic bipartite
+// planar graphs. The user places black and white dots inside a square
+// "fundamental cell"; the computer automatically draws a bipartite planar
+// graph connecting them. The user then picks a finite region shape
+// (square n x n, rectangle w x h, or diamond of radius r) and the tool
+// replicates the fundamental cell across that region. Edges that leave the
+// fundamental cell connect to the corresponding dot in the neighboring
+// copy, so the full finite region shows the tiling behavior.
+//
+// HOW TO READ THIS CODE:
+// The code is split into numbered sections. Read them in order:
+//
+//   1. Constants & State        - the data model
+//   2. Geometry Helpers         - segment intersection math
+//   3. Model Operations         - add/remove dots
+//   4. Auto-Connect Algorithm   - drawing the bipartite planar graph
+//   5. Region Shapes            - which cells are in the finite region
+//   6. Canvas Renderer          - drawing everything on screen
+//   7. UI & Input               - buttons, mouse
+//   8. Initialization           - startup code
+// ============================================================================
+
+'use strict';
+
+// ============================================================================
+// SECTION 1: CONSTANTS & STATE
+//
+// The fundamental cell is a square of side CELL_SIZE (in world coordinates).
+// Dots live inside this square at positions (x, y) with 0 <= x, y <= CELL_SIZE.
+// The finite region is a set of integer cell offsets (i, j); each offset
+// is a copy of the fundamental cell placed at world coordinates
+// (i * CELL_SIZE, j * CELL_SIZE).
+//
+// An edge connects dot A in the fundamental cell to dot B, with an offset
+// (dx, dy) telling us in which neighboring copy B lives. If dx = dy = 0 the
+// edge stays inside a single cell. Otherwise the edge crosses a cell
+// boundary — when we draw cell (i, j), a boundary edge pokes into cell
+// (i + dx, j + dy), and if that cell is also in the region the edge gets
+// drawn as a proper connection.
+// ============================================================================
+
+const CELL_SIZE  = 400;   // Fundamental cell size in world units
+const MAX_PAIRS  = 10;    // Cap on black/white pairs (10 + 10 = 20 dots)
+const DOT_RADIUS = 9;     // Visual dot radius in pixels
+const HIT_RADIUS = 16;    // Click hit-test radius in world units
+
+// The data model.
+let dots = [];            // Each dot: { id, color: 'B' | 'W', x, y }
+let edges = [];           // Each edge: { aId, bId, dx, dy }
+let nextDotId = 1;
+
+// The finite region: which cell offsets are present and which one is the
+// "fundamental" (editable) cell. Recomputed whenever the shape changes,
+// except in 'custom' shape mode, where cells are managed by hand.
+let region = {
+  shape: 'square',        // 'square' | 'rectangle' | 'diamond' | 'custom'
+  n: 3, w: 4, h: 3, r: 2,
+  cells: [],              // Array of { i, j }
+  cellSet: new Set(),     // 'i,j' keys for fast membership
+  fundamental: { i: 0, j: 0 }
+};
+
+// UI state.
+let mode = 'add-black';   // 'add-black' | 'add-white' | 'erase'
+let drawingRegion = false; // when true, clicks toggle cells in/out of region
+let canvas, ctx;
+let view = { scale: 1, panX: 0, panY: 0 };
+
+// Mouse drag tracking so we can tell clicks apart from pans.
+let isPanning   = false;
+let panStart    = null;
+let downPoint   = null;
+let dragDistance = 0;
+
+// ============================================================================
+// SECTION 2: GEOMETRY HELPERS
+//
+// To decide whether the auto-drawn graph is planar we need to detect when
+// two line segments cross. We use the classic "orientation" test based on
+// the sign of a 2D cross product. Two segments AB and CD properly cross if
+// and only if A and B lie on opposite sides of the line CD *and* C and D
+// lie on opposite sides of the line AB.
+//
+// We intentionally treat segments that only meet at a shared endpoint as
+// non-crossing — otherwise every edge meeting at a common dot would count
+// as a crossing, which is not what "planar" means.
+// ============================================================================
+
+function cross(a, b, c) {
+  // Cross product of vectors (b - a) and (c - a).
+  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+function pointsEqual(p, q) {
+  return Math.abs(p.x - q.x) < 1e-6 && Math.abs(p.y - q.y) < 1e-6;
+}
+
+function segmentsCross(a, b, c, d) {
+  // Shared endpoints are allowed — not a crossing.
+  if (pointsEqual(a, c) || pointsEqual(a, d) ||
+      pointsEqual(b, c) || pointsEqual(b, d)) {
+    return false;
+  }
+  const d1 = cross(c, d, a);
+  const d2 = cross(c, d, b);
+  const d3 = cross(a, b, c);
+  const d4 = cross(a, b, d);
+  // Proper crossing: strict sign change on both lines.
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+         ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+}
+
+// ============================================================================
+// SECTION 3: MODEL OPERATIONS
+//
+// Adding or removing a dot invalidates the current edge set, so we always
+// re-run the auto-connect algorithm (Section 4) after a change. Since the
+// graph is small (at most 16 dots), this is cheap and keeps the code simple:
+// the model is always "fully solved" after every edit.
+// ============================================================================
+
+function dotById(id) {
+  for (const d of dots) if (d.id === id) return d;
+  return null;
+}
+
+function countByColor(color) {
+  let n = 0;
+  for (const d of dots) if (d.color === color) n++;
+  return n;
+}
+
+function addDot(x, y, color) {
+  // Enforce Petrov's cap: at most MAX_PAIRS dots of each color.
+  if (countByColor(color) >= MAX_PAIRS) return;
+  dots.push({ id: nextDotId++, color, x, y });
+  recomputeEdges();
+}
+
+function removeDotNear(x, y) {
+  // A dot appears once in every region cell. Clicking any of those copies
+  // should remove the corresponding "real" dot from the fundamental cell,
+  // so search all cells in the region.
+  let bestIdx = -1;
+  let bestD2  = HIT_RADIUS * HIT_RADIUS;
+  for (let i = 0; i < dots.length; i++) {
+    const d = dots[i];
+    for (const cell of region.cells) {
+      const dx = d.x + cell.i * CELL_SIZE - x;
+      const dy = d.y + cell.j * CELL_SIZE - y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD2) { bestD2 = d2; bestIdx = i; }
+    }
+  }
+  if (bestIdx >= 0) {
+    dots.splice(bestIdx, 1);
+    recomputeEdges();
+  }
+}
+
+function clearAll() {
+  dots = [];
+  edges = [];
+  nextDotId = 1;
+}
+
+// ============================================================================
+// SECTION 4: AUTO-CONNECT ALGORITHM
+//
+// Given the current set of black and white dots, produce a set of edges
+// such that:
+//   (a) every edge connects a black dot to a white dot (bipartite),
+//   (b) no two edges cross, even after tiling the plane (planar on torus),
+//   (c) every dot has at least one edge,
+//   (d) the periodic graph is connected (single component).
+//
+// Algorithm — three passes, all working from the same shortest-first list:
+//
+//   PASS 1 (greedy): list every candidate edge (each black-white pair, with
+//   each cell offset (dx, dy) in {-1, 0, 1}^2), sort by length, and add any
+//   that does not cross an existing edge. Short edges fit best, so this
+//   already produces a "rich" bipartite planar graph.
+//
+//   PASS 2 (degree rescue): if a dot still has zero edges after pass 1, walk
+//   its own candidate list and add the shortest non-crossing one. This
+//   guarantees no dot is left stranded.
+//
+//   PASS 3 (component merge): build connected components of the dots using
+//   union-find, walk the candidate list once more, and add any non-crossing
+//   edge that bridges two different components. Repeat until either all
+//   dots are in one component or no bridging edge can be added without a
+//   crossing.
+//
+// The candidate edge offsets in {-1, 0, 1}^2 are enough because the
+// fundamental cell has unit periodicity in both directions, so the shortest
+// connection between any two dots lives within one cell of wrap-around.
+// ============================================================================
+
+function recomputeEdges() {
+  edges = [];
+  const blacks = dots.filter(d => d.color === 'B');
+  const whites = dots.filter(d => d.color === 'W');
+
+  // Build the candidate list: every black-to-white pair, every cell offset.
+  const candidates = [];
+  for (const b of blacks) {
+    for (const w of whites) {
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const ex = w.x + dx * CELL_SIZE - b.x;
+          const ey = w.y + dy * CELL_SIZE - b.y;
+          candidates.push({
+            aId: b.id, bId: w.id, dx, dy,
+            len2: ex * ex + ey * ey
+          });
+        }
+      }
+    }
+  }
+  candidates.sort((a, b) => a.len2 - b.len2);
+
+  // PASS 1: greedy add every non-crossing edge.
+  const used = new Set();   // 'aId,bId,dx,dy' keys for edges already added
+  for (const cand of candidates) {
+    if (!edgeCrossesExisting(cand)) {
+      edges.push({ aId: cand.aId, bId: cand.bId, dx: cand.dx, dy: cand.dy });
+      used.add(candKey(cand));
+    }
+  }
+
+  // PASS 2: degree rescue. Any dot with zero edges gets its shortest
+  // non-crossing incident edge added.
+  for (const dot of dots) {
+    if (dotDegree(dot.id) > 0) continue;
+    for (const cand of candidates) {
+      if (cand.aId !== dot.id && cand.bId !== dot.id) continue;
+      if (used.has(candKey(cand))) continue;
+      if (!edgeCrossesExisting(cand)) {
+        edges.push({ aId: cand.aId, bId: cand.bId, dx: cand.dx, dy: cand.dy });
+        used.add(candKey(cand));
+        break;
+      }
+    }
+  }
+
+  // PASS 3: component merge. Walk candidates shortest-first, add any
+  // non-crossing edge that joins two different components.
+  let parent = unionFindInit();
+  for (const e of edges) unionFindMerge(parent, e.aId, e.bId);
+  for (const cand of candidates) {
+    if (used.has(candKey(cand))) continue;
+    const ra = unionFindFind(parent, cand.aId);
+    const rb = unionFindFind(parent, cand.bId);
+    if (ra === rb) continue;                         // already connected
+    if (edgeCrossesExisting(cand)) continue;
+    edges.push({ aId: cand.aId, bId: cand.bId, dx: cand.dx, dy: cand.dy });
+    used.add(candKey(cand));
+    unionFindMerge(parent, cand.aId, cand.bId);
+  }
+}
+
+function candKey(c) { return c.aId + ',' + c.bId + ',' + c.dx + ',' + c.dy; }
+
+function dotDegree(id) {
+  let n = 0;
+  for (const e of edges) if (e.aId === id || e.bId === id) n++;
+  return n;
+}
+
+// Tiny union-find (disjoint set) — keyed by dot id.
+function unionFindInit() {
+  const parent = new Map();
+  for (const d of dots) parent.set(d.id, d.id);
+  return parent;
+}
+function unionFindFind(parent, x) {
+  while (parent.get(x) !== x) {
+    parent.set(x, parent.get(parent.get(x)));   // path compression
+    x = parent.get(x);
+  }
+  return x;
+}
+function unionFindMerge(parent, a, b) {
+  const ra = unionFindFind(parent, a);
+  const rb = unionFindFind(parent, b);
+  if (ra !== rb) parent.set(ra, rb);
+}
+
+function edgeCrossesExisting(cand) {
+  // Candidate segment (in world coordinates).
+  const a  = dotById(cand.aId);
+  const b  = dotById(cand.bId);
+  const c1 = { x: a.x, y: a.y };
+  const c2 = { x: b.x + cand.dx * CELL_SIZE, y: b.y + cand.dy * CELL_SIZE };
+
+  // Compare against every existing edge, translated by every nearby cell
+  // offset. The window [-2, 2]^2 is comfortably large: candidate endpoints
+  // are within 1 cell of the origin, so only edges within ~2 cells can reach.
+  for (const e of edges) {
+    const ea = dotById(e.aId);
+    const eb = dotById(e.bId);
+    for (let i = -2; i <= 2; i++) {
+      for (let j = -2; j <= 2; j++) {
+        const p1 = { x: ea.x + i * CELL_SIZE, y: ea.y + j * CELL_SIZE };
+        const p2 = {
+          x: eb.x + (e.dx + i) * CELL_SIZE,
+          y: eb.y + (e.dy + j) * CELL_SIZE
+        };
+        if (segmentsCross(c1, c2, p1, p2)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// ============================================================================
+// SECTION 5: REGION SHAPES
+//
+// The finite region is a finite list of integer cell offsets (i, j). Each
+// offset is a position at which we stamp a copy of the fundamental cell.
+// Four shapes are available:
+//
+//   square    - an n x n block: (i, j) in [0, n) x [0, n)
+//   rectangle - a w x h block:  (i, j) in [0, w) x [0, h)
+//   diamond   - |i| + |j| <= r, a diamond centered at (0, 0)
+//   custom    - whatever cells the user clicks on in "Draw Region" mode
+//
+// One cell in the region is the "fundamental" cell — the only one the user
+// can edit and the only one that cannot be removed in custom mode. For the
+// block shapes we use (0, 0); for the diamond we also use (0, 0), which is
+// the center; for custom we keep whatever fundamental was set previously.
+// ============================================================================
+
+function rebuildRegion() {
+  // Custom shape is managed cell-by-cell — never auto-rebuild it.
+  if (region.shape === 'custom') return;
+
+  const cells = [];
+  if (region.shape === 'square') {
+    for (let i = 0; i < region.n; i++) {
+      for (let j = 0; j < region.n; j++) cells.push({ i, j });
+    }
+    region.fundamental = { i: 0, j: 0 };
+  } else if (region.shape === 'rectangle') {
+    for (let i = 0; i < region.w; i++) {
+      for (let j = 0; j < region.h; j++) cells.push({ i, j });
+    }
+    region.fundamental = { i: 0, j: 0 };
+  } else if (region.shape === 'diamond') {
+    for (let i = -region.r; i <= region.r; i++) {
+      for (let j = -region.r; j <= region.r; j++) {
+        if (Math.abs(i) + Math.abs(j) <= region.r) cells.push({ i, j });
+      }
+    }
+    region.fundamental = { i: 0, j: 0 };
+  }
+  region.cells   = cells;
+  region.cellSet = new Set(cells.map(c => c.i + ',' + c.j));
+}
+
+function toggleCellAt(x, y) {
+  // Convert world coordinate into integer cell offset (i, j). The cell
+  // (i, j) covers the world rectangle [i, i+1) * CELL_SIZE in each axis.
+  const i = Math.floor(x / CELL_SIZE);
+  const j = Math.floor(y / CELL_SIZE);
+
+  // The fundamental cell is sacred — it carries the user's dot positions.
+  if (i === region.fundamental.i && j === region.fundamental.j) return;
+
+  const key = i + ',' + j;
+  if (region.cellSet.has(key)) {
+    region.cells = region.cells.filter(c => !(c.i === i && c.j === j));
+    region.cellSet.delete(key);
+  } else {
+    region.cells.push({ i, j });
+    region.cellSet.add(key);
+  }
+
+  // Once the user touches cells by hand, the region is "custom". Reflect
+  // that in the dropdown so the preset size inputs disappear and the user
+  // knows their hand-edits won't be overwritten.
+  region.shape = 'custom';
+  const sel = document.getElementById('shape-select');
+  if (sel) sel.value = 'custom';
+  for (const id of ['row-square', 'row-rectangle', 'row-diamond']) {
+    const r = document.getElementById(id);
+    if (r) r.style.display = 'none';
+  }
+}
+
+function regionBoundingBox() {
+  let minI = Infinity, maxI = -Infinity;
+  let minJ = Infinity, maxJ = -Infinity;
+  for (const c of region.cells) {
+    if (c.i < minI) minI = c.i;
+    if (c.i > maxI) maxI = c.i;
+    if (c.j < minJ) minJ = c.j;
+    if (c.j > maxJ) maxJ = c.j;
+  }
+  return {
+    x0: minI * CELL_SIZE,       y0: minJ * CELL_SIZE,
+    x1: (maxI + 1) * CELL_SIZE, y1: (maxJ + 1) * CELL_SIZE
+  };
+}
+
+// ============================================================================
+// SECTION 6: CANVAS RENDERER
+//
+// The view is a simple pan + uniform scale: world point (x, y) maps to
+// screen point (x * scale + panX, y * scale + panY). We iterate over every
+// cell in the finite region and stamp a copy of the fundamental cell at
+// that position. The fundamental cell gets a bold outline so the user
+// knows which one they can edit; every other cell gets a thin gray outline.
+//
+// IMPORTANT: drawing happens in *layers*, not cell-by-cell. We first paint
+// all cell backgrounds, then all edges, then all dots. If we instead drew
+// each cell completely before moving to the next one, edges that crossed
+// into a neighboring cell's area would be covered by that neighbor's
+// background fill, making the periodic graph look broken at the borders.
+//
+// Edges with an offset (dx, dy) are drawn from cell (i, j) only when the
+// neighbor cell (i + dx, j + dy) is also in the region — this way a cut
+// edge does not dangle off the boundary. Edges wholly inside a single cell
+// are always drawn.
+// ============================================================================
+
+function resizeCanvas() {
+  const rect = canvas.getBoundingClientRect();
+  const dpr  = window.devicePixelRatio || 1;
+  canvas.width  = rect.width  * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function worldToScreen(p) {
+  return { x: p.x * view.scale + view.panX, y: p.y * view.scale + view.panY };
+}
+
+function screenToWorld(p) {
+  return { x: (p.x - view.panX) / view.scale, y: (p.y - view.panY) / view.scale };
+}
+
+function fitView() {
+  // Fit the whole finite region into the canvas, with a bit of margin.
+  // In draw-region mode we pad the view by a few extra cells in each
+  // direction so the user can see and click into "potential" cells beyond
+  // the current region boundary.
+  const rect   = canvas.getBoundingClientRect();
+  const margin = 40;
+  let bb       = regionBoundingBox();
+  if (drawingRegion) {
+    const pad = 2 * CELL_SIZE;
+    bb = { x0: bb.x0 - pad, y0: bb.y0 - pad,
+           x1: bb.x1 + pad, y1: bb.y1 + pad };
+  }
+  const w = bb.x1 - bb.x0;
+  const h = bb.y1 - bb.y0;
+  view.scale = Math.min((rect.width  - margin) / w,
+                        (rect.height - margin) / h);
+  // Center the bounding box inside the canvas.
+  const cx = (bb.x0 + bb.x1) / 2;
+  const cy = (bb.y0 + bb.y1) / 2;
+  view.panX = rect.width  / 2 - cx * view.scale;
+  view.panY = rect.height / 2 - cy * view.scale;
+}
+
+function draw() {
+  const rect = canvas.getBoundingClientRect();
+  ctx.clearRect(0, 0, rect.width, rect.height);
+
+  // Layer 0 (draw mode only): "potential" cells just outside the region,
+  // shown with a dashed outline so the user can click them to add them.
+  if (drawingRegion) drawPotentialCells();
+
+  // Layer 1: cell backgrounds (and thin borders for non-fundamental cells).
+  for (const cell of region.cells) drawCellBackground(cell.i, cell.j);
+
+  // Layer 2: edges. Done after every background so cross-border edges
+  // never get covered by a neighboring cell's fill. Hidden in draw mode
+  // so the user can focus on the cell shape.
+  if (!drawingRegion) {
+    for (const cell of region.cells) drawCellEdges(cell.i, cell.j);
+  }
+
+  // Layer 3: dots, on top of all edges. Also hidden in draw mode.
+  if (!drawingRegion) {
+    for (const cell of region.cells) drawCellDots(cell.i, cell.j);
+  }
+
+  // Layer 4: bold outline of the fundamental cell, on top of everything.
+  drawCellBorder(region.fundamental.i, region.fundamental.j, '#232D4B', 2.5);
+}
+
+function drawPotentialCells() {
+  // Compute the bounding window of cells we offer the user as "addable".
+  // Take the current region bounding box and pad it by 2 cells per side.
+  const bb   = regionBoundingBox();
+  const minI = Math.floor(bb.x0 / CELL_SIZE) - 2;
+  const maxI = Math.floor((bb.x1 - 1) / CELL_SIZE) + 2;
+  const minJ = Math.floor(bb.y0 / CELL_SIZE) - 2;
+  const maxJ = Math.floor((bb.y1 - 1) / CELL_SIZE) + 2;
+
+  ctx.save();
+  ctx.setLineDash([5, 4]);
+  ctx.strokeStyle = '#aaa';
+  ctx.lineWidth   = 1;
+  ctx.fillStyle   = '#fdfaf2';
+  for (let i = minI; i <= maxI; i++) {
+    for (let j = minJ; j <= maxJ; j++) {
+      if (region.cellSet.has(i + ',' + j)) continue;
+      const ox = i * CELL_SIZE;
+      const oy = j * CELL_SIZE;
+      const tl = worldToScreen({ x: ox,             y: oy });
+      const br = worldToScreen({ x: ox + CELL_SIZE, y: oy + CELL_SIZE });
+      ctx.fillRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+      ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+    }
+  }
+  ctx.restore();
+}
+
+function drawCellBackground(i, j) {
+  const ox = i * CELL_SIZE;
+  const oy = j * CELL_SIZE;
+  const isFundamental = (i === region.fundamental.i && j === region.fundamental.j);
+
+  const tl = worldToScreen({ x: ox,             y: oy });
+  const br = worldToScreen({ x: ox + CELL_SIZE, y: oy + CELL_SIZE });
+  ctx.fillStyle = isFundamental ? '#ffffff' : '#f7f2e7';
+  ctx.fillRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+
+  if (!isFundamental) {
+    ctx.strokeStyle = '#bbb';
+    ctx.lineWidth   = 1;
+    ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+  }
+}
+
+function drawCellEdges(i, j) {
+  const ox = i * CELL_SIZE;
+  const oy = j * CELL_SIZE;
+  ctx.strokeStyle = '#E57200';
+  ctx.lineWidth   = 2.4;
+  ctx.lineCap     = 'round';
+  for (const e of edges) {
+    const neighborKey = (i + e.dx) + ',' + (j + e.dy);
+    if (!region.cellSet.has(neighborKey)) continue;
+    const a = dotById(e.aId);
+    const b = dotById(e.bId);
+    const sp = worldToScreen({ x: a.x + ox, y: a.y + oy });
+    const ep = worldToScreen({
+      x: b.x + (i + e.dx) * CELL_SIZE,
+      y: b.y + (j + e.dy) * CELL_SIZE
+    });
+    ctx.beginPath();
+    ctx.moveTo(sp.x, sp.y);
+    ctx.lineTo(ep.x, ep.y);
+    ctx.stroke();
+  }
+}
+
+function drawCellDots(i, j) {
+  const ox = i * CELL_SIZE;
+  const oy = j * CELL_SIZE;
+  for (const d of dots) {
+    const sp = worldToScreen({ x: d.x + ox, y: d.y + oy });
+    ctx.beginPath();
+    ctx.arc(sp.x, sp.y, DOT_RADIUS, 0, 2 * Math.PI);
+    ctx.fillStyle   = d.color === 'B' ? '#232D4B' : '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = '#232D4B';
+    ctx.lineWidth   = 1.5;
+    ctx.stroke();
+  }
+}
+
+function drawCellBorder(i, j, color, width) {
+  const ox = i * CELL_SIZE;
+  const oy = j * CELL_SIZE;
+  const tl = worldToScreen({ x: ox,             y: oy });
+  const br = worldToScreen({ x: ox + CELL_SIZE, y: oy + CELL_SIZE });
+  ctx.strokeStyle = color;
+  ctx.lineWidth   = width;
+  ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+}
+
+// ============================================================================
+// SECTION 7: UI & INPUT
+//
+// The UI has three modes: add a black dot, add a white dot, or erase.
+// Placement modes restrict clicks to inside the fundamental cell; erase
+// mode hit-tests against dots across every cell in the region, so you can
+// click whichever copy you see.
+//
+// Right-click or Ctrl/Cmd-drag pans the view; scrolling zooms around the
+// cursor. We track the drag distance on mousedown/mousemove so that a small
+// movement still counts as a click (otherwise placing dots feels finicky).
+// ============================================================================
+
+function setMode(newMode) {
+  mode = newMode;
+  for (const id of ['add-black', 'add-white', 'erase']) {
+    const btn = document.getElementById('btn-' + id);
+    if (btn) btn.classList.toggle('active', id === newMode);
+  }
+}
+
+function toggleDrawRegion() {
+  drawingRegion = !drawingRegion;
+
+  // Button label and styling.
+  const btn = document.getElementById('btn-draw-region');
+  btn.textContent = drawingRegion ? 'Fix Region' : 'Draw Region';
+  btn.classList.toggle('active', drawingRegion);
+
+  // Disable dot tools while drawing the region — they don't make sense
+  // until the region is fixed.
+  for (const id of ['btn-add-black', 'btn-add-white', 'btn-erase', 'btn-clear']) {
+    document.getElementById(id).disabled = drawingRegion;
+  }
+
+  fitView();
+  draw();
+}
+
+function updateStatus() {
+  const black = countByColor('B');
+  const white = countByColor('W');
+  const pairs = Math.min(black, white);
+
+  // A perfect matching can only exist if #black == #white. We surface this
+  // as a clear "Unbalanced" warning so the user knows the graph cannot
+  // support a dimer covering until they fix the count.
+  let balanceLine;
+  if (black === white) {
+    balanceLine = `<span style="color:#2a7;">Balanced</span>`;
+  } else {
+    const diff = Math.abs(black - white);
+    const need = black > white ? 'white' : 'black';
+    balanceLine = `<span style="color:#c44;">Unbalanced (need ${diff} more ${need})</span>`;
+  }
+
+  document.getElementById('stats').innerHTML =
+    `Dots: ${black} B / ${white} W<br>` +
+    `Max per color: ${MAX_PAIRS}<br>` +
+    `Edges: ${edges.length}<br>` +
+    balanceLine;
+
+  const badge = document.getElementById('status-badge');
+  if (dots.length === 0) {
+    badge.textContent = 'Empty';
+    badge.className = '';
+  } else if (black !== white) {
+    badge.textContent = 'Unbalanced';
+    badge.className = 'invalid';
+  } else {
+    badge.textContent = 'Balanced';
+    badge.className = 'tileable';
+  }
+}
+
+function handleClickAt(screenX, screenY) {
+  const rect = canvas.getBoundingClientRect();
+  const wp = screenToWorld({ x: screenX - rect.left, y: screenY - rect.top });
+
+  // Draw-region mode: clicks toggle whole cells in/out of the region.
+  if (drawingRegion) {
+    toggleCellAt(wp.x, wp.y);
+    updateStatus();
+    draw();
+    return;
+  }
+
+  if (mode === 'erase') {
+    removeDotNear(wp.x, wp.y);
+  } else {
+    // Placement: only accept clicks inside the fundamental cell. Convert
+    // the world coordinate into the cell-local coordinate first.
+    const fx = wp.x - region.fundamental.i * CELL_SIZE;
+    const fy = wp.y - region.fundamental.j * CELL_SIZE;
+    if (fx < 0 || fx > CELL_SIZE || fy < 0 || fy > CELL_SIZE) return;
+    addDot(fx, fy, mode === 'add-black' ? 'B' : 'W');
+  }
+  updateStatus();
+  draw();
+}
+
+function handleMouseDown(event) {
+  downPoint    = { x: event.clientX, y: event.clientY };
+  dragDistance = 0;
+  // Right-button or Ctrl/Cmd + left-button = pan.
+  if (event.button === 2 || event.ctrlKey || event.metaKey) {
+    isPanning = true;
+    panStart  = { x: event.clientX, y: event.clientY,
+                  panX: view.panX,  panY: view.panY };
+    event.preventDefault();
+  }
+}
+
+function handleMouseMove(event) {
+  if (downPoint) {
+    const d = Math.hypot(event.clientX - downPoint.x,
+                         event.clientY - downPoint.y);
+    if (d > dragDistance) dragDistance = d;
+  }
+  if (isPanning) {
+    view.panX = panStart.panX + (event.clientX - panStart.x);
+    view.panY = panStart.panY + (event.clientY - panStart.y);
+    draw();
+  }
+}
+
+function handleMouseUp(event) {
+  // A click is a mouseup with little drag, using the left button, not panning.
+  if (!isPanning && event.button === 0 && dragDistance < 5 && downPoint) {
+    handleClickAt(event.clientX, event.clientY);
+  }
+  isPanning = false;
+  downPoint = null;
+}
+
+function handleWheel(event) {
+  event.preventDefault();
+  const factor = Math.exp(-event.deltaY * 0.001);
+  const rect   = canvas.getBoundingClientRect();
+  const mx     = event.clientX - rect.left;
+  const my     = event.clientY - rect.top;
+  // Zoom around the cursor: keep the world point under the cursor fixed.
+  const before = screenToWorld({ x: mx, y: my });
+  view.scale  *= factor;
+  const after  = screenToWorld({ x: mx, y: my });
+  view.panX   += (after.x - before.x) * view.scale;
+  view.panY   += (after.y - before.y) * view.scale;
+  draw();
+}
+
+function exportPng() {
+  const link = document.createElement('a');
+  link.download = 'lattice.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+function exportJson() {
+  const data = { cellSize: CELL_SIZE, dots, edges };
+  const text = JSON.stringify(data, null, 2);
+  const blob = new Blob([text], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.download = 'lattice.json';
+  link.href = URL.createObjectURL(blob);
+  link.click();
+}
+
+// ============================================================================
+// SECTION 8: INITIALIZATION
+// ============================================================================
+
+function onShapeChanged() {
+  region.shape = document.getElementById('shape-select').value;
+  region.n = parseInt(document.getElementById('size-n').value, 10) || 1;
+  region.w = parseInt(document.getElementById('size-w').value, 10) || 1;
+  region.h = parseInt(document.getElementById('size-h').value, 10) || 1;
+  region.r = parseInt(document.getElementById('size-r').value, 10) || 0;
+
+  document.getElementById('row-square'   ).style.display =
+    region.shape === 'square'    ? 'flex' : 'none';
+  document.getElementById('row-rectangle').style.display =
+    region.shape === 'rectangle' ? 'flex' : 'none';
+  document.getElementById('row-diamond'  ).style.display =
+    region.shape === 'diamond'   ? 'flex' : 'none';
+
+  // 'custom' is a no-op here: cells are managed by hand in draw mode.
+  rebuildRegion();
+  fitView();
+  draw();
+}
+
+function init() {
+  canvas = document.getElementById('canvas');
+  ctx    = canvas.getContext('2d');
+
+  resizeCanvas();
+  rebuildRegion();
+  fitView();
+
+  // Tool buttons.
+  document.getElementById('btn-add-black').addEventListener('click',
+    () => setMode('add-black'));
+  document.getElementById('btn-add-white').addEventListener('click',
+    () => setMode('add-white'));
+  document.getElementById('btn-erase').addEventListener('click',
+    () => setMode('erase'));
+  document.getElementById('btn-clear').addEventListener('click', () => {
+    clearAll();
+    updateStatus();
+    draw();
+  });
+
+  // Export buttons.
+  document.getElementById('btn-export-png') .addEventListener('click', exportPng);
+  document.getElementById('btn-export-json').addEventListener('click', exportJson);
+
+  // Region shape controls.
+  document.getElementById('shape-select').addEventListener('change', onShapeChanged);
+  for (const id of ['size-n', 'size-w', 'size-h', 'size-r']) {
+    document.getElementById(id).addEventListener('input', onShapeChanged);
+  }
+  document.getElementById('btn-draw-region').addEventListener('click', toggleDrawRegion);
+
+  // Canvas mouse events.
+  canvas.addEventListener('mousedown',   handleMouseDown);
+  canvas.addEventListener('mousemove',   handleMouseMove);
+  canvas.addEventListener('mouseup',     handleMouseUp);
+  canvas.addEventListener('mouseleave',  handleMouseUp);
+  canvas.addEventListener('wheel',       handleWheel, { passive: false });
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+  window.addEventListener('resize', () => {
+    resizeCanvas();
+    fitView();
+    draw();
+  });
+
+  updateStatus();
+  draw();
+}
+
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
