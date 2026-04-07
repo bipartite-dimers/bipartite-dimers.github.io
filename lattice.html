@@ -44,7 +44,7 @@
     #status-badge.invalid { background: #c44; }
     #main-layout {
       display: grid;
-      grid-template-columns: 1fr 280px;
+      grid-template-columns: 1fr 300px;
       overflow: hidden;
     }
     canvas {
@@ -53,73 +53,151 @@
       display: block;
       cursor: crosshair;
     }
+
+    /* ---------- Right control panel ---------- */
     #controls {
-      padding: 12px;
+      padding: 10px;
       overflow-y: auto;
-      border-left: 1px solid #ccc;
-      background: #fff;
+      border-left: 1px solid #d8d8d8;
+      background: #fafaf7;
       font-family: system-ui, -apple-system, sans-serif;
-      font-size: 0.85rem;
+      font-size: 0.8rem;
     }
-    .control-section {
-      margin-bottom: 14px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid #eee;
+    .panel {
+      background: #fff;
+      border: 1px solid #e2e2dc;
+      border-radius: 5px;
+      padding: 8px 10px;
+      margin-bottom: 8px;
     }
-    .control-section h3 {
-      font-size: 0.9rem;
+    .panel h3 {
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: #6a6a6a;
+      margin-bottom: 4px;
+    }
+    .panel .hint {
+      font-size: 0.7rem;
+      color: #888;
+      line-height: 1.35;
       margin-bottom: 6px;
-      color: #555;
     }
-    .control-section input[type="number"] {
-      width: 56px;
+
+    /* ---------- Inputs ---------- */
+    label { display: block; margin: 3px 0; font-size: 0.76rem; color: #444; }
+    input[type="number"] {
+      width: 50px;
       padding: 2px 4px;
-      border: 1px solid #ccc;
+      border: 1px solid #cfcfcf;
       border-radius: 3px;
+      font: inherit;
     }
-    .control-section select {
+    select {
       padding: 2px 4px;
-      border: 1px solid #ccc;
+      border: 1px solid #cfcfcf;
       border-radius: 3px;
       background: #fff;
-      font-size: 0.8rem;
+      font: inherit;
     }
-    .control-section label {
-      display: block;
-      margin: 4px 0;
-      font-size: 0.8rem;
+    input:focus, select:focus, button:focus {
+      outline: 2px solid #1a5276;
+      outline-offset: 1px;
     }
+
+    /* ---------- Buttons ---------- */
     button {
-      padding: 4px 10px;
-      margin: 2px;
-      border: 1px solid #999;
+      padding: 4px 8px;
+      border: 1px solid #c8c8c8;
       border-radius: 3px;
       background: #fff;
       cursor: pointer;
-      font-size: 0.8rem;
+      font: inherit;
+      font-size: 0.76rem;
+      color: #2c2c2c;
+      transition: background 0.1s, border-color 0.1s;
     }
-    button:hover { background: #f0f0f0; }
+    button:hover:not(:disabled) { background: #f1f1ec; border-color: #a8a8a8; }
     button.active {
       background: #232D4B;
       color: #fff;
       border-color: #232D4B;
     }
+    button.active:hover:not(:disabled) {
+      background: #34406b;
+      border-color: #34406b;
+      color: #fff;
+    }
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    button.primary {
+      background: #E57200;
+      border-color: #c46100;
+      color: #fff;
+    }
+    button.primary:hover:not(:disabled) {
+      background: #cf6700;
+      border-color: #a85300;
+    }
+    button.danger {
+      color: #a33;
+      border-color: #d8b8b8;
+    }
+    button.danger:hover:not(:disabled) {
+      background: #fbf1f1;
+      border-color: #b88;
+    }
+
+    /* ---------- Layout helpers ---------- */
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      margin: 4px 0;
+    }
+    .row.single { grid-template-columns: 1fr; }
+    .row.three  { grid-template-columns: 1fr 1fr 1fr; }
+    .row.inline {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    /* ---------- Info panel ---------- */
     #stats {
-      font-size: 0.75rem;
-      color: #555;
-      margin-top: 6px;
+      font-size: 0.74rem;
+      color: #444;
       line-height: 1.5;
     }
-    .help {
-      font-size: 0.75rem;
-      color: #888;
-      line-height: 1.4;
-      margin-top: 4px;
+    #stats .stat-line { display: flex; justify-content: space-between; align-items: center; }
+    #stats .stat-label { color: #888; }
+    .badge {
+      display: inline-block;
+      padding: 0 6px;
+      border-radius: 8px;
+      font-size: 0.68rem;
+      font-weight: 600;
     }
-    .row { display: flex; gap: 4px; align-items: center; margin: 4px 0; flex-wrap: wrap; }
+    .badge.ok   { background: #e3f3e8; color: #2a7; }
+    .badge.warn { background: #fbebeb; color: #c44; }
+    .badge.info { background: #e8eef7; color: #1a5276; }
+
+    /* ---------- Helper text ---------- */
+    #tool-hint {
+      min-height: 1.1em;
+      font-size: 0.72rem;
+      margin-top: 4px;
+      color: #1a5276;
+    }
+    #tool-hint.error { color: #c44; }
+
     @media (max-width: 700px) {
       #main-layout { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
-      #controls { max-height: 40vh; border-left: none; border-top: 1px solid #ccc; }
+      #controls { max-height: 45vh; border-left: none; border-top: 1px solid #d8d8d8; }
     }
   </style>
 </head>
@@ -138,73 +216,81 @@
   <div id="main-layout">
     <canvas id="canvas"></canvas>
     <div id="controls">
-      <div class="control-section">
-        <h3>Tools</h3>
-        <div class="row">
-          <button id="btn-add-black" class="active">Add Black</button>
-          <button id="btn-add-white">Add White</button>
-        </div>
-        <div class="row">
+
+      <!-- Dots -->
+      <div class="panel">
+        <h3>Dots</h3>
+        <p class="hint">Click inside the bold cell to place dots (max 10 of each color).</p>
+        <div class="row three">
+          <button id="btn-add-black" class="active">+ Black</button>
+          <button id="btn-add-white">+ White</button>
           <button id="btn-erase">Erase</button>
-          <button id="btn-clear">Clear All</button>
         </div>
-        <p class="help">
-          Click inside the bold square to place dots. The computer draws a
-          bipartite planar graph automatically. Edges that wrap across the
-          cell boundary get mirrored into the neighboring copies.
-        </p>
       </div>
-      <div class="control-section">
-        <h3>Region Shape</h3>
-        <label>
-          Shape:
+
+      <!-- Edges -->
+      <div class="panel">
+        <h3>Edges</h3>
+        <p class="hint"><b>Auto</b> rebuilds edges. <b>Edit</b>: click two dots to add/remove an edge.</p>
+        <div class="row three">
+          <button id="btn-auto-connect" class="primary">Auto</button>
+          <button id="btn-edit-edges">Edit</button>
+          <button id="btn-clear-edges" class="danger">Clear</button>
+        </div>
+        <div id="tool-hint"></div>
+      </div>
+
+      <!-- Region -->
+      <div class="panel">
+        <h3>Region</h3>
+        <p class="hint">Pick a shape, or click <b>Draw Cells</b> to paint a custom region.</p>
+        <div class="row inline">
           <select id="shape-select">
-            <option value="square" selected>Square (n x n)</option>
-            <option value="rectangle">Rectangle (w x h)</option>
-            <option value="diamond">Diamond (radius r)</option>
+            <option value="square" selected>Square</option>
+            <option value="rectangle">Rectangle</option>
+            <option value="diamond">Diamond</option>
             <option value="custom">Custom</option>
           </select>
-        </label>
-        <div class="row" id="row-square">
-          <label>n: <input id="size-n" type="number" value="3" min="1" max="12"></label>
-        </div>
-        <div class="row" id="row-rectangle" style="display:none;">
-          <label>w: <input id="size-w" type="number" value="4" min="1" max="12"></label>
-          <label>h: <input id="size-h" type="number" value="3" min="1" max="12"></label>
-        </div>
-        <div class="row" id="row-diamond" style="display:none;">
-          <label>r: <input id="size-r" type="number" value="2" min="0" max="8"></label>
+          <span id="row-square">
+            n <input id="size-n" type="number" value="3" min="1" max="12">
+          </span>
+          <span id="row-rectangle" style="display:none;">
+            w <input id="size-w" type="number" value="4" min="1" max="12">
+            h <input id="size-h" type="number" value="3" min="1" max="12">
+          </span>
+          <span id="row-diamond" style="display:none;">
+            r <input id="size-r" type="number" value="2" min="0" max="8">
+          </span>
         </div>
         <div class="row">
-          <button id="btn-draw-region">Draw Region</button>
+          <button id="btn-draw-region">Draw Cells</button>
+          <label style="margin:0; display:flex; align-items:center; gap:4px;" title="Show faded copies of the fundamental cell tiling the plane">
+            <input id="show-ghosts" type="checkbox" checked> Tiling
+          </label>
         </div>
-        <p class="help">
-          Pick a preset, or click <b>Draw Region</b> to add/remove cells by
-          clicking. Click <b>Fix Region</b> when done. The bold cell is the
-          fundamental cell and cannot be removed.
-        </p>
       </div>
-      <div class="control-section">
+
+      <!-- Info -->
+      <div class="panel">
         <h3>Info</h3>
-        <div id="stats">
-          Dots: 0 B / 0 W<br>
-          Pairs: 0 / 8<br>
-          Edges: 0
-        </div>
+        <div id="stats"></div>
       </div>
-      <div class="control-section">
+
+      <!-- Export + Reset -->
+      <div class="panel">
         <h3>Export</h3>
-        <div class="row">
-          <button id="btn-export-png">Export PNG</button>
-          <button id="btn-export-json">Export JSON</button>
+        <p class="hint">Save as image or JSON. <b>Reset</b> clears everything.</p>
+        <div class="row three">
+          <button id="btn-export-png">PNG</button>
+          <button id="btn-export-json">JSON</button>
+          <button id="btn-clear" class="danger">Reset</button>
         </div>
       </div>
-      <div class="control-section">
-        <h3>Navigation</h3>
-        <p class="help">
-          Ctrl+drag or right-drag to pan. Scroll to zoom.
-        </p>
-      </div>
+
+      <p class="hint" style="text-align:center; margin-top:4px;">
+        Scroll to zoom · Ctrl+drag to pan
+      </p>
+
     </div>
   </div>
 </div>
@@ -276,10 +362,20 @@ let region = {
 };
 
 // UI state.
-let mode = 'add-black';   // 'add-black' | 'add-white' | 'erase'
+let mode = 'add-black';    // 'add-black' | 'add-white' | 'erase' | 'edit-edges'
 let drawingRegion = false; // when true, clicks toggle cells in/out of region
+let showGhosts = true;     // when false, only the region is rendered (no ghost tiling)
 let canvas, ctx;
 let view = { scale: 1, panX: 0, panY: 0 };
+
+// Manual-edit state. When the user touches edges by hand, we stop auto-
+// recomputing edges on every dot change so their hand-edits survive.
+// The "Auto-connect" button resets this and rebuilds edges from scratch.
+let manualEdit = false;
+
+// When in Connect mode, holds the first-clicked dot (with the cell offset
+// at which it was clicked) so the next click can toggle the edge to it.
+let connectSelection = null;  // null | { dotId, i, j }
 
 // Mouse drag tracking so we can tell clicks apart from pans.
 let isPanning   = false;
@@ -349,7 +445,7 @@ function addDot(x, y, color) {
   // Enforce Petrov's cap: at most MAX_PAIRS dots of each color.
   if (countByColor(color) >= MAX_PAIRS) return;
   dots.push({ id: nextDotId++, color, x, y });
-  recomputeEdges();
+  if (!manualEdit) recomputeEdges();
 }
 
 function removeDotNear(x, y) {
@@ -368,8 +464,14 @@ function removeDotNear(x, y) {
     }
   }
   if (bestIdx >= 0) {
-    dots.splice(bestIdx, 1);
-    recomputeEdges();
+    const removed = dots.splice(bestIdx, 1)[0];
+    if (manualEdit) {
+      // In manual mode, only drop edges that actually touched the removed
+      // dot — leave the rest of the user's hand-built graph alone.
+      edges = edges.filter(e => e.aId !== removed.id && e.bId !== removed.id);
+    } else {
+      recomputeEdges();
+    }
   }
 }
 
@@ -377,6 +479,98 @@ function clearAll() {
   dots = [];
   edges = [];
   nextDotId = 1;
+  manualEdit = false;
+  connectSelection = null;
+}
+
+/**
+ * Toggle the edge between the selected dot and another dot. Both endpoints
+ * are given together with the cell offsets (i, j) at which the user
+ * clicked them — the offset *difference* determines which periodic
+ * translate the edge lives on.
+ *
+ * Edges are stored canonically with the BLACK endpoint as aId so that
+ * lookup is unambiguous (an undirected edge has two directed forms).
+ */
+function toggleEdge(fromDotId, fromI, fromJ, toDotId, toI, toJ) {
+  if (fromDotId === toDotId && fromI === toI && fromJ === toJ) return null;
+  const a = dotById(fromDotId);
+  const b = dotById(toDotId);
+  if (!a || !b) return null;
+
+  // Bipartite check: no black-black or white-white edges.
+  if (a.color === b.color) {
+    return { ok: false, reason: 'Both dots are ' + (a.color === 'B' ? 'black' : 'white') + '. Edges must connect different colors.' };
+  }
+
+  // Canonical form: aId = black, bId = white. Flip offset accordingly.
+  let aId, bId, dx, dy;
+  if (a.color === 'B') {
+    aId = a.id; bId = b.id;
+    dx = toI - fromI; dy = toJ - fromJ;
+  } else {
+    aId = b.id; bId = a.id;
+    dx = fromI - toI; dy = fromJ - toJ;
+  }
+
+  const idx = edges.findIndex(e => e.aId === aId && e.bId === bId &&
+                                   e.dx === dx && e.dy === dy);
+  if (idx >= 0) {
+    edges.splice(idx, 1);
+    manualEdit = true;
+    return { ok: true, action: 'removed' };
+  } else {
+    // Planarity check: would the new edge cross any existing edge (or any
+    // periodic translate of one)? We allow the user to add it anyway —
+    // Petrov asked for arbitrary connect/disconnect — but we surface a
+    // warning so they know the embedding is no longer planar.
+    const crosses = edgeCrossesExisting({ aId, bId, dx, dy });
+    edges.push({ aId, bId, dx, dy });
+    manualEdit = true;
+    return { ok: true, action: 'added', warning: crosses ? 'planar' : null };
+  }
+}
+
+function runAutoConnect() {
+  recomputeEdges();
+  manualEdit = false;
+  connectSelection = null;
+}
+
+/**
+ * Enter manual edit-edges mode: keep the current edges as-is but flip on
+ * the manual flag so future dot edits won't auto-rebuild and erase the
+ * user's hand-edits. From here the user can add edges (click two dots),
+ * remove edges (click two already-connected dots), or wipe with
+ * Clear Edges. Auto-connect is the inverse operation.
+ */
+function startManualEditEdges() {
+  manualEdit = true;
+  connectSelection = null;
+}
+
+function clearEdges() {
+  edges = [];
+  manualEdit = true;
+  connectSelection = null;
+}
+
+/**
+ * Check whether the current edge set has any crossings (in any pair of
+ * periodic translates). Used for the live planarity status indicator.
+ * O(E^2) per check; fine for the small graphs this tool supports.
+ */
+function graphHasCrossings() {
+  for (let k = 0; k < edges.length; k++) {
+    const e = edges[k];
+    // Temporarily remove e from the array so edgeCrossesExisting compares
+    // against everything *else*.
+    const saved = edges.splice(k, 1)[0];
+    const hit = edgeCrossesExisting(saved);
+    edges.splice(k, 0, saved);
+    if (hit) return true;
+  }
+  return false;
 }
 
 // ============================================================================
@@ -622,21 +816,37 @@ function regionBoundingBox() {
 // SECTION 6: CANVAS RENDERER
 //
 // The view is a simple pan + uniform scale: world point (x, y) maps to
-// screen point (x * scale + panX, y * scale + panY). We iterate over every
-// cell in the finite region and stamp a copy of the fundamental cell at
-// that position. The fundamental cell gets a bold outline so the user
-// knows which one they can edit; every other cell gets a thin gray outline.
+// screen point (x * scale + panX, y * scale + panY). On top of that we
+// distinguish two kinds of cells:
 //
-// IMPORTANT: drawing happens in *layers*, not cell-by-cell. We first paint
-// all cell backgrounds, then all edges, then all dots. If we instead drew
-// each cell completely before moving to the next one, edges that crossed
-// into a neighboring cell's area would be covered by that neighbor's
-// background fill, making the periodic graph look broken at the borders.
+//   REAL cells  - the user's finite region. These are the cells the
+//                 downstream sampler actually runs on. Drawn fully opaque.
+//                 The fundamental cell gets a bold outline so the user
+//                 knows which one they can edit.
 //
-// Edges with an offset (dx, dy) are drawn from cell (i, j) only when the
-// neighbor cell (i + dx, j + dy) is also in the region — this way a cut
-// edge does not dangle off the boundary. Edges wholly inside a single cell
-// are always drawn.
+//   GHOST cells - extra visual copies of the fundamental cell stamped
+//                 wherever the viewport happens to show. They are purely
+//                 decorative: they make the periodicity of the lattice
+//                 immediately visible without growing the data model. As
+//                 the user zooms out, more ghost cells appear; the region
+//                 data is unchanged.
+//
+// Every frame we compute the "visible cell window" — the range of integer
+// cell offsets whose world rectangle intersects the canvas — and draw
+// every visible cell, tagging each as real or ghost based on whether its
+// offset is in region.cellSet.
+//
+// IMPORTANT: drawing happens in *layers*, not cell-by-cell. We paint all
+// backgrounds first, then all edges, then all dots. If we instead drew
+// each cell completely before moving on, edges that crossed into a
+// neighboring cell's area would be covered by that neighbor's background
+// fill and the periodic graph would look broken at every cell border.
+// Within each layer ghosts are drawn before real cells so the real
+// (brighter) version wins where they overlap.
+//
+// An edge from cell (i, j) is only drawn if its neighbor cell
+// (i + dx, j + dy) is also visible, so half-edges never dangle into
+// empty space off the edge of the screen.
 // ============================================================================
 
 function resizeCanvas() {
@@ -656,15 +866,17 @@ function screenToWorld(p) {
 }
 
 function fitView() {
-  // Fit the whole finite region into the canvas, with a bit of margin.
-  // In draw-region mode we pad the view by a few extra cells in each
-  // direction so the user can see and click into "potential" cells beyond
-  // the current region boundary.
+  // Fit the finite region into the canvas with a little margin. When ghost
+  // copies are visible (default) we pad the bounding box by 2 extra cells
+  // so the user immediately sees the periodic tiling around the region.
+  // When ghosts are off (e.g. "just the 3x3"), no padding — the canvas
+  // shows exactly the region the sampler would run on.
   const rect   = canvas.getBoundingClientRect();
   const margin = 40;
   let bb       = regionBoundingBox();
-  if (drawingRegion) {
-    const pad = 2 * CELL_SIZE;
+  const padCells = (drawingRegion || showGhosts) ? 2 : 0;
+  if (padCells > 0) {
+    const pad = padCells * CELL_SIZE;
     bb = { x0: bb.x0 - pad, y0: bb.y0 - pad,
            x1: bb.x1 + pad, y1: bb.y1 + pad };
   }
@@ -679,28 +891,82 @@ function fitView() {
   view.panY = rect.height / 2 - cy * view.scale;
 }
 
+function getVisibleCellWindow() {
+  // Which integer cell offsets intersect the current canvas viewport?
+  // Walk the four screen corners back to world coordinates, divide by
+  // CELL_SIZE to get fractional cell indices, and snap outward to whole
+  // cells. Cap the window so extreme zoom-out can't render a million
+  // ghost cells and freeze the browser.
+  const rect = canvas.getBoundingClientRect();
+  const tl   = screenToWorld({ x: 0,          y: 0 });
+  const br   = screenToWorld({ x: rect.width, y: rect.height });
+  let minI = Math.floor(tl.x / CELL_SIZE) - 1;
+  let minJ = Math.floor(tl.y / CELL_SIZE) - 1;
+  let maxI = Math.floor(br.x / CELL_SIZE) + 1;
+  let maxJ = Math.floor(br.y / CELL_SIZE) + 1;
+
+  const MAX_CELLS_PER_AXIS = 60;
+  if (maxI - minI > MAX_CELLS_PER_AXIS) {
+    const mid = Math.floor((minI + maxI) / 2);
+    minI = mid - Math.floor(MAX_CELLS_PER_AXIS / 2);
+    maxI = mid + Math.floor(MAX_CELLS_PER_AXIS / 2);
+  }
+  if (maxJ - minJ > MAX_CELLS_PER_AXIS) {
+    const mid = Math.floor((minJ + maxJ) / 2);
+    minJ = mid - Math.floor(MAX_CELLS_PER_AXIS / 2);
+    maxJ = mid + Math.floor(MAX_CELLS_PER_AXIS / 2);
+  }
+  return { minI, maxI, minJ, maxJ };
+}
+
+function isCellInWindow(i, j, win) {
+  return i >= win.minI && i <= win.maxI && j >= win.minJ && j <= win.maxJ;
+}
+
 function draw() {
   const rect = canvas.getBoundingClientRect();
   ctx.clearRect(0, 0, rect.width, rect.height);
 
   // Layer 0 (draw mode only): "potential" cells just outside the region,
   // shown with a dashed outline so the user can click them to add them.
-  if (drawingRegion) drawPotentialCells();
-
-  // Layer 1: cell backgrounds (and thin borders for non-fundamental cells).
-  for (const cell of region.cells) drawCellBackground(cell.i, cell.j);
-
-  // Layer 2: edges. Done after every background so cross-border edges
-  // never get covered by a neighboring cell's fill. Hidden in draw mode
-  // so the user can focus on the cell shape.
-  if (!drawingRegion) {
-    for (const cell of region.cells) drawCellEdges(cell.i, cell.j);
+  if (drawingRegion) {
+    drawPotentialCells();
+    // In draw-region mode we hide ghosts and edges so the user can focus
+    // on the shape of the region itself.
+    for (const cell of region.cells) drawCellBackground(cell.i, cell.j, false);
+    drawCellBorder(region.fundamental.i, region.fundamental.j, '#232D4B', 2.5);
+    return;
   }
 
-  // Layer 3: dots, on top of all edges. Also hidden in draw mode.
-  if (!drawingRegion) {
-    for (const cell of region.cells) drawCellDots(cell.i, cell.j);
+  // Build the list of visible cells. When ghost copies are enabled this
+  // is every integer offset whose world rectangle intersects the canvas;
+  // when disabled, only the cells inside the region are drawn so the user
+  // sees exactly their finite graph (e.g. just the 3x3 block).
+  const win        = getVisibleCellWindow();
+  const realCells  = [];
+  const ghostCells = [];
+  if (showGhosts) {
+    for (let i = win.minI; i <= win.maxI; i++) {
+      for (let j = win.minJ; j <= win.maxJ; j++) {
+        if (region.cellSet.has(i + ',' + j)) realCells.push({ i, j });
+        else                                 ghostCells.push({ i, j });
+      }
+    }
+  } else {
+    for (const c of region.cells) realCells.push(c);
   }
+
+  // Layer 1: backgrounds. Ghosts first (faint), real cells on top.
+  for (const c of ghostCells) drawCellBackground(c.i, c.j, true);
+  for (const c of realCells ) drawCellBackground(c.i, c.j, false);
+
+  // Layer 2: edges. Ghosts first (faded), then real edges on top.
+  for (const c of ghostCells) drawCellEdges(c.i, c.j, win, true);
+  for (const c of realCells ) drawCellEdges(c.i, c.j, win, false);
+
+  // Layer 3: dots.
+  for (const c of ghostCells) drawCellDots(c.i, c.j, true);
+  for (const c of realCells ) drawCellDots(c.i, c.j, false);
 
   // Layer 4: bold outline of the fundamental cell, on top of everything.
   drawCellBorder(region.fundamental.i, region.fundamental.j, '#232D4B', 2.5);
@@ -734,39 +1000,48 @@ function drawPotentialCells() {
   ctx.restore();
 }
 
-function drawCellBackground(i, j) {
+function drawCellBackground(i, j, isGhost) {
   const ox = i * CELL_SIZE;
   const oy = j * CELL_SIZE;
-  const isFundamental = (i === region.fundamental.i && j === region.fundamental.j);
+  const isFundamental = !isGhost &&
+    (i === region.fundamental.i && j === region.fundamental.j);
 
   const tl = worldToScreen({ x: ox,             y: oy });
   const br = worldToScreen({ x: ox + CELL_SIZE, y: oy + CELL_SIZE });
-  ctx.fillStyle = isFundamental ? '#ffffff' : '#f7f2e7';
+
+  if (isGhost)            ctx.fillStyle = '#fbf7ec';
+  else if (isFundamental) ctx.fillStyle = '#ffffff';
+  else                    ctx.fillStyle = '#f7f2e7';
   ctx.fillRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
 
   if (!isFundamental) {
-    ctx.strokeStyle = '#bbb';
+    ctx.strokeStyle = isGhost ? '#e0dccf' : '#bbb';
     ctx.lineWidth   = 1;
     ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
   }
 }
 
-function drawCellEdges(i, j) {
+function drawCellEdges(i, j, win, isGhost) {
   const ox = i * CELL_SIZE;
   const oy = j * CELL_SIZE;
-  ctx.strokeStyle = '#E57200';
-  ctx.lineWidth   = 2.4;
+  ctx.strokeStyle = isGhost ? '#f2c999' : '#E57200';
+  ctx.lineWidth   = isGhost ? 1.5       : 2.4;
   ctx.lineCap     = 'round';
   for (const e of edges) {
-    const neighborKey = (i + e.dx) + ',' + (j + e.dy);
-    if (!region.cellSet.has(neighborKey)) continue;
+    // Only draw the edge if its neighboring cell is also being rendered.
+    // With ghosts on, the relevant universe is the viewport window; with
+    // ghosts off, it's strictly the region (so cross-region edges don't
+    // dangle into empty space).
+    const ni = i + e.dx;
+    const nj = j + e.dy;
+    const neighborOk = showGhosts
+      ? isCellInWindow(ni, nj, win)
+      : region.cellSet.has(ni + ',' + nj);
+    if (!neighborOk) continue;
     const a = dotById(e.aId);
     const b = dotById(e.bId);
-    const sp = worldToScreen({ x: a.x + ox, y: a.y + oy });
-    const ep = worldToScreen({
-      x: b.x + (i + e.dx) * CELL_SIZE,
-      y: b.y + (j + e.dy) * CELL_SIZE
-    });
+    const sp = worldToScreen({ x: a.x + ox,              y: a.y + oy });
+    const ep = worldToScreen({ x: b.x + ni * CELL_SIZE,  y: b.y + nj * CELL_SIZE });
     ctx.beginPath();
     ctx.moveTo(sp.x, sp.y);
     ctx.lineTo(ep.x, ep.y);
@@ -774,19 +1049,32 @@ function drawCellEdges(i, j) {
   }
 }
 
-function drawCellDots(i, j) {
+function drawCellDots(i, j, isGhost) {
   const ox = i * CELL_SIZE;
   const oy = j * CELL_SIZE;
+  ctx.globalAlpha = isGhost ? 0.5 : 1.0;
+  const r = isGhost ? DOT_RADIUS * 0.75 : DOT_RADIUS;
   for (const d of dots) {
     const sp = worldToScreen({ x: d.x + ox, y: d.y + oy });
+
+    // If this dot is the Connect-mode selection, draw a highlight halo
+    // underneath so every copy of the selected dot is visually marked.
+    if (connectSelection && connectSelection.dotId === d.id) {
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, r + 5, 0, 2 * Math.PI);
+      ctx.fillStyle = '#E57200';
+      ctx.fill();
+    }
+
     ctx.beginPath();
-    ctx.arc(sp.x, sp.y, DOT_RADIUS, 0, 2 * Math.PI);
+    ctx.arc(sp.x, sp.y, r, 0, 2 * Math.PI);
     ctx.fillStyle   = d.color === 'B' ? '#232D4B' : '#ffffff';
     ctx.fill();
     ctx.strokeStyle = '#232D4B';
-    ctx.lineWidth   = 1.5;
+    ctx.lineWidth   = isGhost ? 1 : 1.5;
     ctx.stroke();
   }
+  ctx.globalAlpha = 1.0;
 }
 
 function drawCellBorder(i, j, color, width) {
@@ -814,10 +1102,51 @@ function drawCellBorder(i, j, color, width) {
 
 function setMode(newMode) {
   mode = newMode;
-  for (const id of ['add-black', 'add-white', 'erase']) {
+  for (const id of ['add-black', 'add-white', 'erase', 'edit-edges']) {
     const btn = document.getElementById('btn-' + id);
     if (btn) btn.classList.toggle('active', id === newMode);
   }
+  // Leaving Edit Edges mode cancels any half-made selection.
+  if (newMode !== 'edit-edges') connectSelection = null;
+  setToolHint('');
+  draw();
+}
+
+function setToolHint(text, isError) {
+  const el = document.getElementById('tool-hint');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('error', !!isError);
+}
+
+/**
+ * Find the dot (and the cell offset at which it was clicked) nearest to a
+ * world-space click point. Searches every cell in the currently visible
+ * window, not just region cells, so the user can click any visible copy
+ * of a dot — including ghost copies — when connecting edges.
+ */
+function findDotAtWorld(x, y) {
+  const win = getVisibleCellWindow();
+  let bestDot = null, bestI = 0, bestJ = 0;
+  let bestD2 = HIT_RADIUS * HIT_RADIUS;
+  for (let i = win.minI; i <= win.maxI; i++) {
+    for (let j = win.minJ; j <= win.maxJ; j++) {
+      const ox = i * CELL_SIZE;
+      const oy = j * CELL_SIZE;
+      for (const d of dots) {
+        const ddx = d.x + ox - x;
+        const ddy = d.y + oy - y;
+        const d2  = ddx * ddx + ddy * ddy;
+        if (d2 < bestD2) {
+          bestD2  = d2;
+          bestDot = d;
+          bestI   = i;
+          bestJ   = j;
+        }
+      }
+    }
+  }
+  return bestDot ? { dot: bestDot, i: bestI, j: bestJ } : null;
 }
 
 function toggleDrawRegion() {
@@ -830,7 +1159,9 @@ function toggleDrawRegion() {
 
   // Disable dot tools while drawing the region — they don't make sense
   // until the region is fixed.
-  for (const id of ['btn-add-black', 'btn-add-white', 'btn-erase', 'btn-clear']) {
+  for (const id of ['btn-add-black', 'btn-add-white', 'btn-edit-edges',
+                    'btn-erase', 'btn-auto-connect', 'btn-clear-edges',
+                    'btn-clear']) {
     document.getElementById(id).disabled = drawingRegion;
   }
 
@@ -841,37 +1172,48 @@ function toggleDrawRegion() {
 function updateStatus() {
   const black = countByColor('B');
   const white = countByColor('W');
-  const pairs = Math.min(black, white);
+  const balanced = (black === white && dots.length > 0);
 
-  // A perfect matching can only exist if #black == #white. We surface this
-  // as a clear "Unbalanced" warning so the user knows the graph cannot
-  // support a dimer covering until they fix the count.
-  let balanceLine;
-  if (black === white) {
-    balanceLine = `<span style="color:#2a7;">Balanced</span>`;
+  // Build a row in the stats panel: a label on the left, value on the right.
+  const row = (label, value) =>
+    `<div class="stat-line"><span class="stat-label">${label}</span>` +
+    `<span>${value}</span></div>`;
+
+  // Balance — necessary condition for a perfect matching.
+  let balanceBadge;
+  if (dots.length === 0) {
+    balanceBadge = `<span class="badge">empty</span>`;
+  } else if (balanced) {
+    balanceBadge = `<span class="badge ok">balanced</span>`;
   } else {
-    const diff = Math.abs(black - white);
     const need = black > white ? 'white' : 'black';
-    balanceLine = `<span style="color:#c44;">Unbalanced (need ${diff} more ${need})</span>`;
+    balanceBadge = `<span class="badge warn">need ${Math.abs(black - white)} ${need}</span>`;
+  }
+
+  // Edges: show manual vs auto and (in manual mode) planarity.
+  const modeBadge = manualEdit
+    ? `<span class="badge info">manual</span>`
+    : `<span class="badge">auto</span>`;
+
+  let planarBadge = '';
+  if (manualEdit && edges.length > 0) {
+    planarBadge = graphHasCrossings()
+      ? ` <span class="badge warn">not planar</span>`
+      : ` <span class="badge ok">planar</span>`;
   }
 
   document.getElementById('stats').innerHTML =
-    `Dots: ${black} B / ${white} W<br>` +
-    `Max per color: ${MAX_PAIRS}<br>` +
-    `Edges: ${edges.length}<br>` +
-    balanceLine;
+    row('Black dots', `${black} / ${MAX_PAIRS}`) +
+    row('White dots', `${white} / ${MAX_PAIRS}`) +
+    row('Balance',    balanceBadge) +
+    row('Edges',      `${edges.length} ${modeBadge}${planarBadge}`) +
+    row('Cells',      region.cells.length);
 
+  // Header badge mirrors the balance state for an at-a-glance summary.
   const badge = document.getElementById('status-badge');
-  if (dots.length === 0) {
-    badge.textContent = 'Empty';
-    badge.className = '';
-  } else if (black !== white) {
-    badge.textContent = 'Unbalanced';
-    badge.className = 'invalid';
-  } else {
-    badge.textContent = 'Balanced';
-    badge.className = 'tileable';
-  }
+  if (dots.length === 0)       { badge.textContent = 'Empty';      badge.className = ''; }
+  else if (!balanced)          { badge.textContent = 'Unbalanced'; badge.className = 'invalid'; }
+  else                         { badge.textContent = 'Balanced';   badge.className = 'tileable'; }
 }
 
 function handleClickAt(screenX, screenY) {
@@ -881,6 +1223,13 @@ function handleClickAt(screenX, screenY) {
   // Draw-region mode: clicks toggle whole cells in/out of the region.
   if (drawingRegion) {
     toggleCellAt(wp.x, wp.y);
+    updateStatus();
+    draw();
+    return;
+  }
+
+  if (mode === 'edit-edges') {
+    handleConnectClick(wp.x, wp.y);
     updateStatus();
     draw();
     return;
@@ -898,6 +1247,54 @@ function handleClickAt(screenX, screenY) {
   }
   updateStatus();
   draw();
+}
+
+function handleConnectClick(wx, wy) {
+  const hit = findDotAtWorld(wx, wy);
+  if (!hit) {
+    // Clicking empty space cancels the current selection.
+    connectSelection = null;
+    setToolHint('Click a dot to start.');
+    return;
+  }
+
+  // First click: start a selection.
+  if (!connectSelection) {
+    connectSelection = { dotId: hit.dot.id, i: hit.i, j: hit.j };
+    setToolHint('Now click a ' +
+      (hit.dot.color === 'B' ? 'white' : 'black') +
+      ' dot to toggle the edge. Click empty space to cancel.');
+    return;
+  }
+
+  // Second click on the same dot copy: cancel.
+  if (connectSelection.dotId === hit.dot.id &&
+      connectSelection.i === hit.i &&
+      connectSelection.j === hit.j) {
+    connectSelection = null;
+    setToolHint('Selection cleared.');
+    return;
+  }
+
+  // Second click on another dot: toggle the edge.
+  const result = toggleEdge(
+    connectSelection.dotId, connectSelection.i, connectSelection.j,
+    hit.dot.id, hit.i, hit.j
+  );
+  connectSelection = null;
+  if (!result) {
+    setToolHint('');
+    return;
+  }
+  if (!result.ok) {
+    setToolHint(result.reason, true);
+    return;
+  }
+  if (result.action === 'added' && result.warning === 'planar') {
+    setToolHint('Edge added — warning: this edge crosses another. Graph is no longer planar.', true);
+  } else {
+    setToolHint(result.action === 'added' ? 'Edge added.' : 'Edge removed.');
+  }
 }
 
 function handleMouseDown(event) {
@@ -978,11 +1375,11 @@ function onShapeChanged() {
   region.r = parseInt(document.getElementById('size-r').value, 10) || 0;
 
   document.getElementById('row-square'   ).style.display =
-    region.shape === 'square'    ? 'flex' : 'none';
+    region.shape === 'square'    ? 'inline' : 'none';
   document.getElementById('row-rectangle').style.display =
-    region.shape === 'rectangle' ? 'flex' : 'none';
+    region.shape === 'rectangle' ? 'inline' : 'none';
   document.getElementById('row-diamond'  ).style.display =
-    region.shape === 'diamond'   ? 'flex' : 'none';
+    region.shape === 'diamond'   ? 'inline' : 'none';
 
   // 'custom' is a no-op here: cells are managed by hand in draw mode.
   rebuildRegion();
@@ -1003,8 +1400,26 @@ function init() {
     () => setMode('add-black'));
   document.getElementById('btn-add-white').addEventListener('click',
     () => setMode('add-white'));
+  document.getElementById('btn-edit-edges').addEventListener('click', () => {
+    startManualEditEdges();
+    setMode('edit-edges');
+    setToolHint('Click a dot to start. Click two connected dots to remove an edge.');
+    updateStatus();
+    draw();
+  });
   document.getElementById('btn-erase').addEventListener('click',
     () => setMode('erase'));
+  document.getElementById('btn-auto-connect').addEventListener('click', () => {
+    runAutoConnect();
+    updateStatus();
+    draw();
+  });
+  document.getElementById('btn-clear-edges').addEventListener('click', () => {
+    clearEdges();
+    setToolHint('Edges cleared.');
+    updateStatus();
+    draw();
+  });
   document.getElementById('btn-clear').addEventListener('click', () => {
     clearAll();
     updateStatus();
@@ -1021,6 +1436,13 @@ function init() {
     document.getElementById(id).addEventListener('input', onShapeChanged);
   }
   document.getElementById('btn-draw-region').addEventListener('click', toggleDrawRegion);
+
+  // Show/hide ghost copies.
+  document.getElementById('show-ghosts').addEventListener('change', (e) => {
+    showGhosts = e.target.checked;
+    fitView();
+    draw();
+  });
 
   // Canvas mouse events.
   canvas.addEventListener('mousedown',   handleMouseDown);
