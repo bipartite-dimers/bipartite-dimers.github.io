@@ -230,6 +230,9 @@
           <button id="btn-move">Move</button>
           <button id="btn-erase">Erase</button>
         </div>
+        <div class="row single">
+          <button id="btn-clear-dots" class="danger">Clear All Dots</button>
+        </div>
       </div>
 
       <!-- Edges -->
@@ -258,7 +261,7 @@
       <!-- Region -->
       <div class="panel">
         <h3>Region</h3>
-        <p class="hint">Drag the dashed shape to move it. Drag corners/vertices to reshape. In Polygon mode, double-click an edge to add a vertex or double-click a vertex to remove it.</p>
+        <p class="hint">Drag the dashed shape to move it. Drag corners/vertices to reshape.</p>
         <div class="row inline">
           <select id="shape-select">
             <option value="rect" selected>Rectangle</option>
@@ -266,6 +269,10 @@
             <option value="polygon">Polygon (free)</option>
           </select>
           <button id="btn-recenter" title="Center the region on the fundamental cell">Re-center</button>
+        </div>
+        <div class="row" id="polygon-tools" style="display:none;">
+          <button id="btn-poly-add-vertex" title="Add a vertex: click an edge of the polygon">+ Vertex</button>
+          <button id="btn-poly-remove-vertex" title="Remove a vertex: click the vertex you want to delete">- Vertex</button>
         </div>
       </div>
 
@@ -388,7 +395,7 @@ function defaultHexagonPoints() {
 }
 
 // UI state.
-let mode = 'add-black';    // 'add-black' | 'add-white' | 'move' | 'erase' | 'edit-edges'
+let mode = 'add-black';    // 'add-black' | 'add-white' | 'move' | 'erase' | 'edit-edges' | 'poly-add-vertex' | 'poly-remove-vertex'
 let canvas, ctx;
 let view = { scale: 1, panX: 0, panY: 0 };
 
@@ -1172,12 +1179,47 @@ function drawLatticeGrid(win) {
 function drawAllEdges(win) {
   ctx.lineCap = 'round';
 
-  // When showing a matching, draw ONLY the matching edges — no background
-  // lines at all. This is the cleanest possible visual: the dots are still
-  // shown via drawAllDots, and the user sees exactly N_B thick orange
-  // lines, one per black dot, covering the entire matching and nothing
-  // else. Any line visible on screen is part of the matching, full stop.
+  // When showing a matching, do TWO passes:
+  //   1. Unmatched in-region edges as faint DASHED lines, so the user can
+  //      still see the underlying graph structure ("imaginary" lines that
+  //      were dropped from the matching).
+  //   2. Matched edges as thick solid bright orange on top.
+  // Dots are drawn separately by drawAllDots.
   if (shownMatching) {
+    // Pass 1: dashed "ghost" of the unmatched in-region edges.
+    ctx.save();
+    ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = 'rgba(150, 130, 90, 0.55)';
+    ctx.lineWidth   = 1.2;
+    for (let i = win.minI; i <= win.maxI; i++) {
+      for (let j = win.minJ; j <= win.maxJ; j++) {
+        for (const e of edges) {
+          // Skip matching edges — they're drawn solid below.
+          if (shownMatching.has(edgeInstanceKey(e.aId, e.bId, e.dx, e.dy, i, j))) continue;
+          const ni = i + e.dx;
+          const nj = j + e.dy;
+          if (!isCellInWindow(ni, nj, win)) continue;
+          const a = dotById(e.aId);
+          const b = dotById(e.bId);
+          const aWx = a.x + i * CELL_SIZE;
+          const aWy = a.y + j * CELL_SIZE;
+          const bWx = b.x + ni * CELL_SIZE;
+          const bWy = b.y + nj * CELL_SIZE;
+          // Only draw the ghost for edges whose both endpoints are inside
+          // the region (the "finite graph" we're taking a matching of).
+          if (!isPointInRegion(aWx, aWy) || !isPointInRegion(bWx, bWy)) continue;
+          const sp = worldToScreen({ x: aWx, y: aWy });
+          const ep = worldToScreen({ x: bWx, y: bWy });
+          ctx.beginPath();
+          ctx.moveTo(sp.x, sp.y);
+          ctx.lineTo(ep.x, ep.y);
+          ctx.stroke();
+        }
+      }
+    }
+    ctx.restore();
+
+    // Pass 2: matching edges, solid thick orange on top.
     ctx.strokeStyle = '#E57200';
     ctx.lineWidth   = 5;
     for (let i = win.minI; i <= win.maxI; i++) {
@@ -1317,6 +1359,12 @@ function setMode(newMode) {
     const btn = document.getElementById('btn-' + id);
     if (btn) btn.classList.toggle('active', id === newMode);
   }
+  // Polygon vertex-edit buttons are separate so they can be toggled too.
+  const addVBtn = document.getElementById('btn-poly-add-vertex');
+  const rmVBtn  = document.getElementById('btn-poly-remove-vertex');
+  if (addVBtn) addVBtn.classList.toggle('active', newMode === 'poly-add-vertex');
+  if (rmVBtn)  rmVBtn .classList.toggle('active', newMode === 'poly-remove-vertex');
+
   // Leaving Edit Edges mode cancels any half-made selection.
   if (newMode !== 'edit-edges') connectSelection = null;
   setToolHint('');
@@ -1453,6 +1501,19 @@ function handleClickAt(screenX, screenY) {
     return;
   }
 
+  if (mode === 'poly-add-vertex') {
+    polygonAddVertexAt(wp.x, wp.y);
+    updateStatus();
+    draw();
+    return;
+  }
+  if (mode === 'poly-remove-vertex') {
+    polygonRemoveVertexNear(wp.x, wp.y);
+    updateStatus();
+    draw();
+    return;
+  }
+
   if (mode === 'erase') {
     removeDotNear(wp.x, wp.y);
   } else {
@@ -1464,6 +1525,51 @@ function handleClickAt(screenX, screenY) {
   }
   updateStatus();
   draw();
+}
+
+/**
+ * Insert a new polygon vertex. The click point is projected onto the
+ * nearest polygon edge (using perpendicular distance) and a vertex is
+ * inserted at that projected point. No tolerance check — the user
+ * explicitly asked for add-vertex mode, so any click adds one.
+ */
+function polygonAddVertexAt(wx, wy) {
+  if (region.type !== 'polygon') return;
+  const pts = region.polygon.points;
+  let bestIdx = 0, bestDistSq = Infinity, bestPt = null;
+  for (let k = 0; k < pts.length; k++) {
+    const a = pts[k];
+    const b = pts[(k + 1) % pts.length];
+    const p = closestPointOnSegment({ x: wx, y: wy }, a, b);
+    const dsq = (p.x - wx) ** 2 + (p.y - wy) ** 2;
+    if (dsq < bestDistSq) { bestDistSq = dsq; bestIdx = k; bestPt = p; }
+  }
+  region.polygon.points.splice(bestIdx + 1, 0, bestPt);
+  invalidateMatching();
+  setToolHint('Vertex added. Click again to add another.');
+}
+
+/**
+ * Remove the polygon vertex closest to a click. Requires the polygon to
+ * keep at least 3 vertices (otherwise it would stop being a valid polygon).
+ */
+function polygonRemoveVertexNear(wx, wy) {
+  if (region.type !== 'polygon') return;
+  const pts = region.polygon.points;
+  if (pts.length <= 3) {
+    setToolHint('A polygon must have at least 3 vertices.', true);
+    return;
+  }
+  let bestIdx = -1, bestDistSq = Infinity;
+  for (let k = 0; k < pts.length; k++) {
+    const dsq = (pts[k].x - wx) ** 2 + (pts[k].y - wy) ** 2;
+    if (dsq < bestDistSq) { bestDistSq = dsq; bestIdx = k; }
+  }
+  if (bestIdx >= 0) {
+    pts.splice(bestIdx, 1);
+    invalidateMatching();
+    setToolHint('Vertex removed. Click again to remove another.');
+  }
 }
 
 function handleConnectClick(wx, wy) {
@@ -1558,6 +1664,13 @@ function handleMouseDown(event) {
     }
   }
 
+  // Erase mode: if the click is near a dot, let the click through so the
+  // erase handler fires. Otherwise fall through to the region-drag check
+  // (so the user can still drag the region with erase selected).
+  if (mode === 'erase') {
+    if (findDotAtWorld(wp.x, wp.y)) return;
+  }
+
   // Resize handle has highest priority — small target, easy to mistake.
   const handle = pickHandle(wp.x, wp.y);
   if (handle) {
@@ -1569,6 +1682,10 @@ function handleMouseDown(event) {
     event.preventDefault();
     return;
   }
+
+  // Polygon vertex edit mode: clicks add/remove vertices, they don't drag
+  // the region body. Handled in handleClickAt via the normal click path.
+  if (mode === 'poly-add-vertex' || mode === 'poly-remove-vertex') return;
 
   // Then the shape body — but skip if the user is trying to place a dot
   // inside the fundamental cell (placement wins there).
@@ -1818,6 +1935,16 @@ function exportJson() {
 
 function onShapeChanged() {
   region.type = document.getElementById('shape-select').value;
+  // Show the polygon-specific vertex-edit buttons only when Polygon is
+  // selected. Also exit any polygon sub-mode if switching away.
+  const polyTools = document.getElementById('polygon-tools');
+  if (polyTools) {
+    polyTools.style.display = (region.type === 'polygon') ? '' : 'none';
+  }
+  if (region.type !== 'polygon' &&
+      (mode === 'poly-add-vertex' || mode === 'poly-remove-vertex')) {
+    setMode('add-black');
+  }
   invalidateMatching();
   draw();
   updateStatus();
@@ -1885,6 +2012,11 @@ function init() {
     updateStatus();
     draw();
   });
+  document.getElementById('btn-clear-dots').addEventListener('click', () => {
+    clearAll();
+    updateStatus();
+    draw();
+  });
 
   // Export buttons.
   document.getElementById('btn-export-png') .addEventListener('click', exportPng);
@@ -1893,6 +2025,14 @@ function init() {
   // Region controls.
   document.getElementById('shape-select').addEventListener('change', onShapeChanged);
   document.getElementById('btn-recenter').addEventListener('click', recenterRegion);
+  document.getElementById('btn-poly-add-vertex').addEventListener('click', () => {
+    setMode('poly-add-vertex');
+    setToolHint('Click on/near a polygon edge to insert a vertex.');
+  });
+  document.getElementById('btn-poly-remove-vertex').addEventListener('click', () => {
+    setMode('poly-remove-vertex');
+    setToolHint('Click on the vertex you want to remove.');
+  });
 
   // Matching controls.
   document.getElementById('btn-show-matching').addEventListener('click', () => {
