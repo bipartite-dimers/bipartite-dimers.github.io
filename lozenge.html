@@ -146,6 +146,7 @@
           <button id="btn-draw" class="active">Draw</button>
           <button id="btn-erase">Erase</button>
           <button id="btn-clear">Clear All</button>
+          <button id="btn-repair" disabled title="Add minimal triangles to make region tileable">Make Tileable</button>
         </div>
         <p style="font-size:0.75rem; color:#888; margin-top:4px;">
           Click to add/remove triangles. Ctrl+drag or right-drag to pan. Scroll to zoom.
@@ -703,6 +704,82 @@ function findInitialMatching() {
   }
 
   return true;
+}
+
+/**
+ * Repair an invalid region by adding the minimum number of exterior triangles
+ * to make it tileable.
+ *
+ * Algorithm:
+ *   1. Use the max-flow already computed by findInitialMatching() to identify
+ *      which black and white triangles are matched (even if the matching is
+ *      not perfect).
+ *   2. For each unmatched black triangle, add one exterior white neighbor.
+ *   3. For each unmatched white triangle, add one exterior black neighbor.
+ *   4. Reinitialize to rebuild the grid and re-run matching.
+ *
+ * Returns true if the region is now tileable after repair.
+ */
+function repairRegion() {
+  const numBlack = blackTriangles.length;
+  const numWhite = whiteTriangles.length;
+  const S = numBlack + numWhite;
+
+  if (numBlack === 0 && numWhite === 0) return false;
+
+  // Find which triangles are matched in the current max flow
+  const matchedBlack = new Set();
+  const matchedWhite = new Set();
+
+  for (let i = 0; i < numBlack; i++) {
+    for (const e of flowAdj[i]) {
+      if (e.to >= numBlack && e.to < S && e.flow === 1) {
+        matchedBlack.add(i);
+        matchedWhite.add(e.to - numBlack);
+        break;
+      }
+    }
+  }
+
+  // For each unmatched black triangle, add an exterior white neighbor
+  for (let i = 0; i < numBlack; i++) {
+    if (matchedBlack.has(i)) continue;
+
+    const bn = blackTriangles[i].n;
+    const bj = blackTriangles[i].j;
+
+    // White neighbors of Black(n,j): White(n,j), White(n,j-1), White(n-1,j)
+    const neighbors = [[bn, bj], [bn, bj - 1], [bn - 1, bj]];
+
+    for (const [wn, wj] of neighbors) {
+      if (!whiteMap.has(makeKey(wn, wj))) {
+        activeTriangles.set(`${wn},${wj},2`, { n: wn, j: wj, type: 2 });
+        break;
+      }
+    }
+  }
+
+  // For each unmatched white triangle, add an exterior black neighbor
+  for (let i = 0; i < numWhite; i++) {
+    if (matchedWhite.has(i)) continue;
+
+    const wn = whiteTriangles[i].n;
+    const wj = whiteTriangles[i].j;
+
+    // Black neighbors of White(n,j): Black(n,j), Black(n,j+1), Black(n+1,j)
+    const neighbors = [[wn, wj], [wn, wj + 1], [wn + 1, wj]];
+
+    for (const [bn, bj] of neighbors) {
+      if (!blackMap.has(makeKey(bn, bj))) {
+        activeTriangles.set(`${bn},${bj},1`, { n: bn, j: bj, type: 1 });
+        break;
+      }
+    }
+  }
+
+  // Rebuild everything with the expanded region
+  reinitialize();
+  return isValid;
 }
 
 
@@ -1365,18 +1442,22 @@ function reinitialize() {
 function updateStatusBadge() {
   const badge = document.getElementById('status-badge');
   const btn = document.getElementById('btn-start-stop');
+  const repairBtn = document.getElementById('btn-repair');
   if (activeTriangles.size === 0) {
     badge.textContent = 'Empty';
     badge.className = '';
     btn.disabled = true;
+    repairBtn.disabled = true;
   } else if (isValid) {
     badge.textContent = `Tileable (${blackTriangles.length} + ${whiteTriangles.length})`;
     badge.className = 'tileable';
     btn.disabled = false;
+    repairBtn.disabled = true;
   } else {
     badge.textContent = `Not tileable (${blackTriangles.length}B / ${whiteTriangles.length}W)`;
     badge.className = 'invalid';
     btn.disabled = true;
+    repairBtn.disabled = false;
   }
 }
 
@@ -1588,6 +1669,11 @@ document.getElementById('btn-clear').addEventListener('click', () => {
   reinitialize();
 });
 
+document.getElementById('btn-repair').addEventListener('click', () => {
+  if (isValid || activeTriangles.size === 0) return;
+  repairRegion();
+});
+
 document.getElementById('btn-hexagon').addEventListener('click', () => {
   const a = readHexSize('hex-a');
   const b = readHexSize('hex-b');
@@ -1619,6 +1705,18 @@ document.getElementById('btn-export').addEventListener('click', () => {
   link.download = 'lozenge-tiling.png';
   link.href = canvas.toDataURL('image/png');
   link.click();
+});
+
+// --- Keyboard shortcuts ---
+
+document.addEventListener('keydown', (e) => {
+  // Ignore if typing in an input
+  if (e.target.tagName === 'INPUT') return;
+
+  if (e.key === 'm' || e.key === 'M') {
+    const repairBtn = document.getElementById('btn-repair');
+    if (!repairBtn.disabled) repairBtn.click();
+  }
 });
 
 // --- Resize handling ---
