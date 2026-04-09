@@ -160,6 +160,7 @@
     }
     .row.single { grid-template-columns: 1fr; }
     .row.three  { grid-template-columns: 1fr 1fr 1fr; }
+    .row.four   { grid-template-columns: 1fr 1fr 1fr 1fr; }
     .row.inline {
       display: flex;
       gap: 6px;
@@ -187,13 +188,15 @@
     .badge.info { background: #e8eef7; color: #1a5276; }
 
     /* ---------- Helper text ---------- */
-    #tool-hint {
+    #tool-hint,
+    #matching-hint {
       min-height: 1.1em;
       font-size: 0.72rem;
       margin-top: 4px;
       color: #1a5276;
     }
-    #tool-hint.error { color: #c44; }
+    #tool-hint.error,
+    #matching-hint.error { color: #c44; }
 
     @media (max-width: 700px) {
       #main-layout { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
@@ -220,10 +223,11 @@
       <!-- Dots -->
       <div class="panel">
         <h3>Dots</h3>
-        <p class="hint">Click inside the bold cell to place dots (max 10 of each color).</p>
-        <div class="row three">
+        <p class="hint">Click in the bold cell to place dots. Use <b>Move</b> to drag a dot (any visible copy).</p>
+        <div class="row four">
           <button id="btn-add-black" class="active">+ Black</button>
           <button id="btn-add-white">+ White</button>
+          <button id="btn-move">Move</button>
           <button id="btn-erase">Erase</button>
         </div>
       </div>
@@ -240,33 +244,28 @@
         <div id="tool-hint"></div>
       </div>
 
+      <!-- Matching -->
+      <div class="panel">
+        <h3>Matching</h3>
+        <p class="hint">Find one perfect matching of the dots inside the region. If none exists, the region isn't tileable.</p>
+        <div class="row">
+          <button id="btn-show-matching" class="primary">Show matching</button>
+          <button id="btn-hide-matching">Hide</button>
+        </div>
+        <div id="matching-hint"></div>
+      </div>
+
       <!-- Region -->
       <div class="panel">
         <h3>Region</h3>
-        <p class="hint">Pick a shape, or click <b>Draw Cells</b> to paint a custom region.</p>
+        <p class="hint">Drag the dashed shape to move it. Drag corners/vertices to reshape. In Polygon mode, double-click an edge to add a vertex or double-click a vertex to remove it.</p>
         <div class="row inline">
           <select id="shape-select">
-            <option value="square" selected>Square</option>
-            <option value="rectangle">Rectangle</option>
-            <option value="diamond">Diamond</option>
-            <option value="custom">Custom</option>
+            <option value="rect" selected>Rectangle</option>
+            <option value="circle">Circle</option>
+            <option value="polygon">Polygon (free)</option>
           </select>
-          <span id="row-square">
-            n <input id="size-n" type="number" value="3" min="1" max="12">
-          </span>
-          <span id="row-rectangle" style="display:none;">
-            w <input id="size-w" type="number" value="4" min="1" max="12">
-            h <input id="size-h" type="number" value="3" min="1" max="12">
-          </span>
-          <span id="row-diamond" style="display:none;">
-            r <input id="size-r" type="number" value="2" min="0" max="8">
-          </span>
-        </div>
-        <div class="row">
-          <button id="btn-draw-region">Draw Cells</button>
-          <label style="margin:0; display:flex; align-items:center; gap:4px;" title="Show faded copies of the fundamental cell tiling the plane">
-            <input id="show-ghosts" type="checkbox" checked> Tiling
-          </label>
+          <button id="btn-recenter" title="Center the region on the fundamental cell">Re-center</button>
         </div>
       </div>
 
@@ -328,45 +327,81 @@
 //
 // The fundamental cell is a square of side CELL_SIZE (in world coordinates).
 // Dots live inside this square at positions (x, y) with 0 <= x, y <= CELL_SIZE.
-// The finite region is a set of integer cell offsets (i, j); each offset
-// is a copy of the fundamental cell placed at world coordinates
-// (i * CELL_SIZE, j * CELL_SIZE).
+// The fundamental cell is then tiled across the whole plane, producing the
+// infinite periodic lattice.
 //
-// An edge connects dot A in the fundamental cell to dot B, with an offset
-// (dx, dy) telling us in which neighboring copy B lives. If dx = dy = 0 the
-// edge stays inside a single cell. Otherwise the edge crosses a cell
-// boundary — when we draw cell (i, j), a boundary edge pokes into cell
-// (i + dx, j + dy), and if that cell is also in the region the edge gets
-// drawn as a proper connection.
+// The "region" is a SHAPE drawn over that infinite lattice — a rectangle or
+// circle in world coordinates that the user can drag and resize. A dot
+// instance at world position p is part of the finite graph iff p lies
+// inside the shape. An edge instance is included iff both of its endpoints
+// lie inside the shape. This is finer-grained than cutting along whole
+// fundamental cells: a single fundamental cell can contribute some dots
+// (those inside the shape) and not others, breaking rigid periodicity and
+// giving a graph with many possible perfect matchings.
+//
+// An edge in the periodic lattice is stored as (aId, bId, dx, dy): the
+// black dot a in cell (0, 0) is connected to the white dot b in cell
+// (dx, dy). To enumerate all instances of that edge in the visible window,
+// we shift the (a, b) pair by every cell offset (i, j) the viewport spans.
 // ============================================================================
 
 const CELL_SIZE  = 400;   // Fundamental cell size in world units
 const MAX_PAIRS  = 10;    // Cap on black/white pairs (10 + 10 = 20 dots)
 const DOT_RADIUS = 9;     // Visual dot radius in pixels
 const HIT_RADIUS = 16;    // Click hit-test radius in world units
+const HANDLE_PX  = 10;    // Resize-handle size in screen pixels
 
 // The data model.
 let dots = [];            // Each dot: { id, color: 'B' | 'W', x, y }
 let edges = [];           // Each edge: { aId, bId, dx, dy }
 let nextDotId = 1;
 
-// The finite region: which cell offsets are present and which one is the
-// "fundamental" (editable) cell. Recomputed whenever the shape changes,
-// except in 'custom' shape mode, where cells are managed by hand.
+// The region: a shape in world coordinates. The fundamental cell at
+// (i, j) = (0, 0) is the editable copy and stays bold; everything else in
+// the periodic lattice is rendered as background tiling. The "real" finite
+// graph is whatever falls inside the region shape.
 let region = {
-  shape: 'square',        // 'square' | 'rectangle' | 'diamond' | 'custom'
-  n: 3, w: 4, h: 3, r: 2,
-  cells: [],              // Array of { i, j }
-  cellSet: new Set(),     // 'i,j' keys for fast membership
+  type: 'rect',           // 'rect' | 'circle' | 'polygon'
+  // Rectangle in world units (default: 3x3 cells starting at the fundamental).
+  rect: { x: 0, y: 0, w: 3 * CELL_SIZE, h: 3 * CELL_SIZE },
+  // Circle in world units.
+  circle: { cx: 1.5 * CELL_SIZE, cy: 1.5 * CELL_SIZE, r: 1.5 * CELL_SIZE },
+  // Polygon: an array of {x, y} world-coordinate vertices. Default is a
+  // regular hexagon centered on the fundamental cell — intentionally
+  // NOT aligned to fundamental-domain boundaries so the resulting cut
+  // produces graphs with many perfect matchings (that's the whole point
+  // of cutting at finer granularity than whole cells).
+  polygon: { points: defaultHexagonPoints() },
   fundamental: { i: 0, j: 0 }
 };
 
+function defaultHexagonPoints() {
+  const cx = 1.5 * CELL_SIZE;
+  const cy = 1.5 * CELL_SIZE;
+  const r  = 1.5 * CELL_SIZE;
+  const pts = [];
+  for (let k = 0; k < 6; k++) {
+    const a = (Math.PI / 3) * k - Math.PI / 2;  // pointy-top hexagon
+    pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+  }
+  return pts;
+}
+
 // UI state.
-let mode = 'add-black';    // 'add-black' | 'add-white' | 'erase' | 'edit-edges'
-let drawingRegion = false; // when true, clicks toggle cells in/out of region
-let showGhosts = true;     // when false, only the region is rendered (no ghost tiling)
+let mode = 'add-black';    // 'add-black' | 'add-white' | 'move' | 'erase' | 'edit-edges'
 let canvas, ctx;
 let view = { scale: 1, panX: 0, panY: 0 };
+
+// Region drag state. When the user grabs the region shape (or one of its
+// resize handles), we track the original geometry and the world point at
+// which the drag started so we can compute deltas during mousemove.
+let regionDrag = null;    // null | { mode: 'move' | 'resize-<handle>', startWorld, original }
+
+// Vertex drag state. When the user drags a dot in Move mode we record the
+// dot id, the cursor world position at the start of the drag, and the
+// dot's original local position so mousemove can compute the new local
+// position by simple addition (deltas in world == deltas in cell-local).
+let vertexDrag = null;    // null | { dotId, startWorld, startLocal }
 
 // Manual-edit state. When the user touches edges by hand, we stop auto-
 // recomputing edges on every dot change so their hand-edits survive.
@@ -376,6 +411,13 @@ let manualEdit = false;
 // When in Connect mode, holds the first-clicked dot (with the cell offset
 // at which it was clicked) so the next click can toggle the edge to it.
 let connectSelection = null;  // null | { dotId, i, j }
+
+// When the user clicks "Show matching" we compute a perfect matching of
+// the induced subgraph inside the region shape and store the chosen edges
+// here. Each entry is a key string identifying a specific (aId, bId, i, j)
+// edge instance in the periodic lattice. The renderer highlights those
+// instances and fades the rest. Set to null when not showing a matching.
+let shownMatching = null;     // null | Set<string>
 
 // Mouse drag tracking so we can tell clicks apart from pans.
 let isPanning   = false;
@@ -446,32 +488,35 @@ function addDot(x, y, color) {
   if (countByColor(color) >= MAX_PAIRS) return;
   dots.push({ id: nextDotId++, color, x, y });
   if (!manualEdit) recomputeEdges();
+  invalidateMatching();
 }
 
 function removeDotNear(x, y) {
-  // A dot appears once in every region cell. Clicking any of those copies
-  // should remove the corresponding "real" dot from the fundamental cell,
-  // so search all cells in the region.
+  // A dot appears in every visible cell of the periodic lattice. Clicking
+  // any visible copy should remove the underlying dot from the fundamental
+  // cell. Search every cell in the visible window.
+  const win = getVisibleCellWindow();
   let bestIdx = -1;
   let bestD2  = HIT_RADIUS * HIT_RADIUS;
   for (let i = 0; i < dots.length; i++) {
     const d = dots[i];
-    for (const cell of region.cells) {
-      const dx = d.x + cell.i * CELL_SIZE - x;
-      const dy = d.y + cell.j * CELL_SIZE - y;
-      const d2 = dx * dx + dy * dy;
-      if (d2 < bestD2) { bestD2 = d2; bestIdx = i; }
+    for (let ci = win.minI; ci <= win.maxI; ci++) {
+      for (let cj = win.minJ; cj <= win.maxJ; cj++) {
+        const dx = d.x + ci * CELL_SIZE - x;
+        const dy = d.y + cj * CELL_SIZE - y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestD2) { bestD2 = d2; bestIdx = i; }
+      }
     }
   }
   if (bestIdx >= 0) {
     const removed = dots.splice(bestIdx, 1)[0];
     if (manualEdit) {
-      // In manual mode, only drop edges that actually touched the removed
-      // dot — leave the rest of the user's hand-built graph alone.
       edges = edges.filter(e => e.aId !== removed.id && e.bId !== removed.id);
     } else {
       recomputeEdges();
     }
+    invalidateMatching();
   }
 }
 
@@ -481,6 +526,7 @@ function clearAll() {
   nextDotId = 1;
   manualEdit = false;
   connectSelection = null;
+  invalidateMatching();
 }
 
 /**
@@ -518,15 +564,13 @@ function toggleEdge(fromDotId, fromI, fromJ, toDotId, toI, toJ) {
   if (idx >= 0) {
     edges.splice(idx, 1);
     manualEdit = true;
+    invalidateMatching();
     return { ok: true, action: 'removed' };
   } else {
-    // Planarity check: would the new edge cross any existing edge (or any
-    // periodic translate of one)? We allow the user to add it anyway —
-    // Petrov asked for arbitrary connect/disconnect — but we surface a
-    // warning so they know the embedding is no longer planar.
     const crosses = edgeCrossesExisting({ aId, bId, dx, dy });
     edges.push({ aId, bId, dx, dy });
     manualEdit = true;
+    invalidateMatching();
     return { ok: true, action: 'added', warning: crosses ? 'planar' : null };
   }
 }
@@ -535,6 +579,7 @@ function runAutoConnect() {
   recomputeEdges();
   manualEdit = false;
   connectSelection = null;
+  invalidateMatching();
 }
 
 /**
@@ -553,6 +598,7 @@ function clearEdges() {
   edges = [];
   manualEdit = true;
   connectSelection = null;
+  invalidateMatching();
 }
 
 /**
@@ -723,130 +769,288 @@ function edgeCrossesExisting(cand) {
 }
 
 // ============================================================================
-// SECTION 5: REGION SHAPES
+// SECTION 5: REGION SHAPE
 //
-// The finite region is a finite list of integer cell offsets (i, j). Each
-// offset is a position at which we stamp a copy of the fundamental cell.
-// Four shapes are available:
+// The region is a SHAPE in world coordinates that the user drags around
+// over the infinite tiled lattice. A dot instance at world point p is part
+// of the finite graph iff isPointInRegion(p) is true. An edge instance is
+// included iff both of its endpoints satisfy that test.
 //
-//   square    - an n x n block: (i, j) in [0, n) x [0, n)
-//   rectangle - a w x h block:  (i, j) in [0, w) x [0, h)
-//   diamond   - |i| + |j| <= r, a diamond centered at (0, 0)
-//   custom    - whatever cells the user clicks on in "Draw Region" mode
+// Two shapes are supported:
+//   rect   - { x, y, w, h } in world units
+//   circle - { cx, cy, r }   in world units
 //
-// One cell in the region is the "fundamental" cell — the only one the user
-// can edit and the only one that cannot be removed in custom mode. For the
-// block shapes we use (0, 0); for the diamond we also use (0, 0), which is
-// the center; for custom we keep whatever fundamental was set previously.
+// The fundamental cell at (0, 0) stays bold so the user always knows where
+// to click to edit dots — even if the region shape has been dragged far
+// away from it.
 // ============================================================================
 
-function rebuildRegion() {
-  // Custom shape is managed cell-by-cell — never auto-rebuild it.
-  if (region.shape === 'custom') return;
+function isPointInRegion(x, y) {
+  if (region.type === 'rect') {
+    const r = region.rect;
+    return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+  } else if (region.type === 'circle') {
+    const c = region.circle;
+    const dx = x - c.cx, dy = y - c.cy;
+    return dx * dx + dy * dy <= c.r * c.r;
+  } else if (region.type === 'polygon') {
+    return pointInPolygon(x, y, region.polygon.points);
+  }
+  return false;
+}
 
-  const cells = [];
-  if (region.shape === 'square') {
-    for (let i = 0; i < region.n; i++) {
-      for (let j = 0; j < region.n; j++) cells.push({ i, j });
+/**
+ * Ray-casting point-in-polygon test. Shoots a ray in the +x direction from
+ * (px, py) and counts how many polygon edges it crosses; odd = inside,
+ * even = outside. Works for any simple polygon (convex or concave).
+ */
+function pointInPolygon(px, py, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i].x, yi = pts[i].y;
+    const xj = pts[j].x, yj = pts[j].y;
+    const intersects = ((yi > py) !== (yj > py)) &&
+                       (px < ((xj - xi) * (py - yi)) / (yj - yi) + xi);
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+/** Build a Path2D-like path on `ctx` covering the region in screen pixels. */
+function regionPath() {
+  ctx.beginPath();
+  if (region.type === 'rect') {
+    const r  = region.rect;
+    const tl = worldToScreen({ x: r.x,         y: r.y });
+    const br = worldToScreen({ x: r.x + r.w,   y: r.y + r.h });
+    ctx.rect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+  } else if (region.type === 'circle') {
+    const c      = region.circle;
+    const center = worldToScreen({ x: c.cx, y: c.cy });
+    ctx.arc(center.x, center.y, c.r * view.scale, 0, 2 * Math.PI);
+  } else if (region.type === 'polygon') {
+    const pts = region.polygon.points;
+    if (pts.length < 2) return;
+    const first = worldToScreen(pts[0]);
+    ctx.moveTo(first.x, first.y);
+    for (let i = 1; i < pts.length; i++) {
+      const p = worldToScreen(pts[i]);
+      ctx.lineTo(p.x, p.y);
     }
-    region.fundamental = { i: 0, j: 0 };
-  } else if (region.shape === 'rectangle') {
-    for (let i = 0; i < region.w; i++) {
-      for (let j = 0; j < region.h; j++) cells.push({ i, j });
+    ctx.closePath();
+  }
+}
+
+/** World-coordinate bounding box of the region shape. */
+function regionBoundingBox() {
+  if (region.type === 'rect') {
+    const r = region.rect;
+    return { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h };
+  } else if (region.type === 'circle') {
+    const c = region.circle;
+    return { x0: c.cx - c.r, y0: c.cy - c.r, x1: c.cx + c.r, y1: c.cy + c.r };
+  } else {
+    const pts = region.polygon.points;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of pts) {
+      if (p.x < x0) x0 = p.x;
+      if (p.y < y0) y0 = p.y;
+      if (p.x > x1) x1 = p.x;
+      if (p.y > y1) y1 = p.y;
     }
-    region.fundamental = { i: 0, j: 0 };
-  } else if (region.shape === 'diamond') {
-    for (let i = -region.r; i <= region.r; i++) {
-      for (let j = -region.r; j <= region.r; j++) {
-        if (Math.abs(i) + Math.abs(j) <= region.r) cells.push({ i, j });
+    return { x0, y0, x1, y1 };
+  }
+}
+
+/**
+ * Resize-handle positions in WORLD coordinates. Used both for drawing the
+ * little squares and for hit-testing drags.
+ *   rect    - 4 corner handles
+ *   circle  - 1 handle on the right edge
+ *   polygon - 1 handle per vertex (named 'v0', 'v1', ...)
+ */
+function regionHandles() {
+  if (region.type === 'rect') {
+    const r = region.rect;
+    return [
+      { name: 'nw', x: r.x,         y: r.y         },
+      { name: 'ne', x: r.x + r.w,   y: r.y         },
+      { name: 'se', x: r.x + r.w,   y: r.y + r.h   },
+      { name: 'sw', x: r.x,         y: r.y + r.h   },
+    ];
+  } else if (region.type === 'circle') {
+    const c = region.circle;
+    return [{ name: 'r', x: c.cx + c.r, y: c.cy }];
+  } else {
+    return region.polygon.points.map((p, i) =>
+      ({ name: 'v' + i, x: p.x, y: p.y }));
+  }
+}
+
+/** Pick a handle near a world point, or null. Tolerance scales with view. */
+function pickHandle(wx, wy) {
+  const tol = HANDLE_PX / view.scale;
+  for (const h of regionHandles()) {
+    if (Math.abs(wx - h.x) <= tol && Math.abs(wy - h.y) <= tol) return h;
+  }
+  return null;
+}
+
+// ============================================================================
+// SECTION 5B: PERFECT MATCHING INSIDE THE REGION
+//
+// Given the current fundamental cell, the periodic edge list, and the
+// region shape, we want to find a perfect matching of the induced
+// subgraph — the vertices are dot instances (d, i, j) with d.x + i*CELL
+// and d.y + j*CELL inside the region, and the edges are the instances of
+// the periodic edges whose two endpoints are both inside.
+//
+// We use the simplest bipartite-matching algorithm: augmenting paths via
+// DFS. For the size of graphs this tool handles (≤ a few hundred vertices)
+// it's effectively instant and much easier to read than full Dinic's.
+//
+// Returned matching keys are strings of the form 'aId:bId:i:j' — enough
+// to uniquely identify which edge instance was chosen. The renderer uses
+// these keys to highlight the right edges.
+// ============================================================================
+
+/**
+ * Unique key for a specific edge instance in the tiled lattice. Must
+ * include the offset (dx, dy) because two distinct periodic edges can
+ * share the same (aId, bId) pair but differ in which copy of the white
+ * endpoint they connect to — e.g. B→W same cell vs B→W right-neighbor.
+ * Omitting (dx, dy) causes all such parallel edges to collapse to the
+ * same key and the renderer would draw all of them when the matching
+ * only picked one.
+ */
+function edgeInstanceKey(aId, bId, dx, dy, i, j) {
+  return aId + ':' + bId + ':' + dx + ':' + dy + ':' + i + ':' + j;
+}
+
+/** Enumerate dot instances inside the region, keyed for graph algorithms. */
+function enumerateRegionVertices() {
+  const win = getVisibleCellWindow();
+  const vertices = new Map();  // key 'dotId_i_j' → { d, i, j, color }
+  for (let i = win.minI; i <= win.maxI; i++) {
+    for (let j = win.minJ; j <= win.maxJ; j++) {
+      for (const d of dots) {
+        if (isPointInRegion(d.x + i * CELL_SIZE, d.y + j * CELL_SIZE)) {
+          vertices.set(d.id + '_' + i + '_' + j,
+                       { d, i, j, color: d.color });
+        }
       }
     }
-    region.fundamental = { i: 0, j: 0 };
   }
-  region.cells   = cells;
-  region.cellSet = new Set(cells.map(c => c.i + ',' + c.j));
+  return vertices;
 }
 
-function toggleCellAt(x, y) {
-  // Convert world coordinate into integer cell offset (i, j). The cell
-  // (i, j) covers the world rectangle [i, i+1) * CELL_SIZE in each axis.
-  const i = Math.floor(x / CELL_SIZE);
-  const j = Math.floor(y / CELL_SIZE);
-
-  // The fundamental cell is sacred — it carries the user's dot positions.
-  if (i === region.fundamental.i && j === region.fundamental.j) return;
-
-  const key = i + ',' + j;
-  if (region.cellSet.has(key)) {
-    region.cells = region.cells.filter(c => !(c.i === i && c.j === j));
-    region.cellSet.delete(key);
-  } else {
-    region.cells.push({ i, j });
-    region.cellSet.add(key);
+/**
+ * Build the induced bipartite graph: for every edge (aId, bId, dx, dy) in
+ * the periodic lattice and every cell (i, j) in view, include the specific
+ * instance if both its endpoints are inside the region. The returned
+ * adjacency is keyed by black-vertex key -> list of { whiteKey, instanceKey }.
+ */
+function buildInducedAdjacency(vertices) {
+  const win = getVisibleCellWindow();
+  const adj = new Map();
+  for (const [key, v] of vertices) {
+    if (v.color === 'B') adj.set(key, []);
   }
-
-  // Once the user touches cells by hand, the region is "custom". Reflect
-  // that in the dropdown so the preset size inputs disappear and the user
-  // knows their hand-edits won't be overwritten.
-  region.shape = 'custom';
-  const sel = document.getElementById('shape-select');
-  if (sel) sel.value = 'custom';
-  for (const id of ['row-square', 'row-rectangle', 'row-diamond']) {
-    const r = document.getElementById(id);
-    if (r) r.style.display = 'none';
+  for (let i = win.minI; i <= win.maxI; i++) {
+    for (let j = win.minJ; j <= win.maxJ; j++) {
+      for (const e of edges) {
+        // Canonical form: aId is black, bId is white (see toggleEdge).
+        const blackKey = e.aId + '_' + i + '_' + j;
+        const ni = i + e.dx, nj = j + e.dy;
+        const whiteKey = e.bId + '_' + ni + '_' + nj;
+        if (vertices.has(blackKey) && vertices.has(whiteKey)) {
+          adj.get(blackKey).push({
+            whiteKey,
+            instanceKey: edgeInstanceKey(e.aId, e.bId, e.dx, e.dy, i, j)
+          });
+        }
+      }
+    }
   }
+  return adj;
 }
 
-function regionBoundingBox() {
-  let minI = Infinity, maxI = -Infinity;
-  let minJ = Infinity, maxJ = -Infinity;
-  for (const c of region.cells) {
-    if (c.i < minI) minI = c.i;
-    if (c.i > maxI) maxI = c.i;
-    if (c.j < minJ) minJ = c.j;
-    if (c.j > maxJ) maxJ = c.j;
+/**
+ * Classical bipartite augmenting-path matching. For each black vertex, try
+ * to find an augmenting path to an unmatched white via alternating DFS.
+ * Returns an object {ok, matching, reason}. `matching` is a Set of
+ * instance keys for the chosen edges (only present when ok === true).
+ */
+function findPerfectMatching() {
+  const vertices = enumerateRegionVertices();
+
+  // Count blacks and whites — necessary condition.
+  let nB = 0, nW = 0;
+  for (const [, v] of vertices) {
+    if (v.color === 'B') nB++; else nW++;
   }
-  return {
-    x0: minI * CELL_SIZE,       y0: minJ * CELL_SIZE,
-    x1: (maxI + 1) * CELL_SIZE, y1: (maxJ + 1) * CELL_SIZE
-  };
+  if (nB === 0 && nW === 0) {
+    return { ok: false, reason: 'No dots inside the region.' };
+  }
+  if (nB !== nW) {
+    return { ok: false, reason:
+      `Region has ${nB} black and ${nW} white dots — unbalanced, no perfect matching is possible.` };
+  }
+
+  const adj = buildInducedAdjacency(vertices);
+  const matchBlack = new Map();  // blackKey -> { whiteKey, instanceKey }
+  const matchWhite = new Map();  // whiteKey -> { blackKey, instanceKey }
+
+  function augment(blackKey, visited) {
+    for (const link of adj.get(blackKey) || []) {
+      if (visited.has(link.whiteKey)) continue;
+      visited.add(link.whiteKey);
+      const existing = matchWhite.get(link.whiteKey);
+      if (!existing || augment(existing.blackKey, visited)) {
+        matchBlack.set(blackKey, link);
+        matchWhite.set(link.whiteKey, { blackKey, instanceKey: link.instanceKey });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  let matched = 0;
+  for (const blackKey of adj.keys()) {
+    if (augment(blackKey, new Set())) matched++;
+  }
+
+  if (matched !== nB) {
+    return { ok: false, reason:
+      `No perfect matching: only ${matched} of ${nB} blacks could be paired. The induced graph has no way to tile this region.` };
+  }
+
+  const instances = new Set();
+  for (const [, link] of matchBlack) instances.add(link.instanceKey);
+  return { ok: true, matching: instances, size: matched };
 }
 
 // ============================================================================
 // SECTION 6: CANVAS RENDERER
 //
-// The view is a simple pan + uniform scale: world point (x, y) maps to
-// screen point (x * scale + panX, y * scale + panY). On top of that we
-// distinguish two kinds of cells:
+// The renderer paints the periodic lattice across the entire canvas
+// viewport — every dot and every edge from every visible cell — and then
+// uses the region shape to decide which dots and edges are "real" (part
+// of the finite graph) and which are background tiling.
 //
-//   REAL cells  - the user's finite region. These are the cells the
-//                 downstream sampler actually runs on. Drawn fully opaque.
-//                 The fundamental cell gets a bold outline so the user
-//                 knows which one they can edit.
+//   - Lattice cells: thin gray outlines, just to show the periodic grid.
+//   - Inside the region shape: cells get a brighter background fill, dots
+//     and edges are full-opacity orange/navy.
+//   - Outside the region shape: dots and edges are faded so the user can
+//     still see the periodic structure but visually they're "out".
 //
-//   GHOST cells - extra visual copies of the fundamental cell stamped
-//                 wherever the viewport happens to show. They are purely
-//                 decorative: they make the periodicity of the lattice
-//                 immediately visible without growing the data model. As
-//                 the user zooms out, more ghost cells appear; the region
-//                 data is unchanged.
+// The fundamental cell (i = j = 0) always gets a bold navy outline so the
+// user knows where to click to edit dots, regardless of where the region
+// shape currently sits.
 //
-// Every frame we compute the "visible cell window" — the range of integer
-// cell offsets whose world rectangle intersects the canvas — and draw
-// every visible cell, tagging each as real or ghost based on whether its
-// offset is in region.cellSet.
-//
-// IMPORTANT: drawing happens in *layers*, not cell-by-cell. We paint all
-// backgrounds first, then all edges, then all dots. If we instead drew
-// each cell completely before moving on, edges that crossed into a
-// neighboring cell's area would be covered by that neighbor's background
-// fill and the periodic graph would look broken at every cell border.
-// Within each layer ghosts are drawn before real cells so the real
-// (brighter) version wins where they overlap.
-//
-// An edge from cell (i, j) is only drawn if its neighbor cell
-// (i + dx, j + dy) is also visible, so half-edges never dangle into
-// empty space off the edge of the screen.
+// Drawing happens in *layers*, not cell-by-cell. Backgrounds first, then
+// edges, then dots. Drawing a single cell at a time would let later cells'
+// background fills clobber the previous cells' boundary-crossing edges.
 // ============================================================================
 
 function resizeCanvas() {
@@ -866,25 +1070,19 @@ function screenToWorld(p) {
 }
 
 function fitView() {
-  // Fit the finite region into the canvas with a little margin. When ghost
-  // copies are visible (default) we pad the bounding box by 2 extra cells
-  // so the user immediately sees the periodic tiling around the region.
-  // When ghosts are off (e.g. "just the 3x3"), no padding — the canvas
-  // shows exactly the region the sampler would run on.
+  // Fit the region shape into the canvas, padded by 2 cells on each side
+  // so the surrounding lattice is visible (otherwise the region would feel
+  // disconnected from the tiling).
   const rect   = canvas.getBoundingClientRect();
   const margin = 40;
+  const pad    = 2 * CELL_SIZE;
   let bb       = regionBoundingBox();
-  const padCells = (drawingRegion || showGhosts) ? 2 : 0;
-  if (padCells > 0) {
-    const pad = padCells * CELL_SIZE;
-    bb = { x0: bb.x0 - pad, y0: bb.y0 - pad,
-           x1: bb.x1 + pad, y1: bb.y1 + pad };
-  }
+  bb = { x0: bb.x0 - pad, y0: bb.y0 - pad,
+         x1: bb.x1 + pad, y1: bb.y1 + pad };
   const w = bb.x1 - bb.x0;
   const h = bb.y1 - bb.y0;
   view.scale = Math.min((rect.width  - margin) / w,
                         (rect.height - margin) / h);
-  // Center the bounding box inside the canvas.
   const cx = (bb.x0 + bb.x1) / 2;
   const cy = (bb.y0 + bb.y1) / 2;
   view.panX = rect.width  / 2 - cx * view.scale;
@@ -927,164 +1125,177 @@ function draw() {
   const rect = canvas.getBoundingClientRect();
   ctx.clearRect(0, 0, rect.width, rect.height);
 
-  // Layer 0 (draw mode only): "potential" cells just outside the region,
-  // shown with a dashed outline so the user can click them to add them.
-  if (drawingRegion) {
-    drawPotentialCells();
-    // In draw-region mode we hide ghosts and edges so the user can focus
-    // on the shape of the region itself.
-    for (const cell of region.cells) drawCellBackground(cell.i, cell.j, false);
-    drawCellBorder(region.fundamental.i, region.fundamental.j, '#232D4B', 2.5);
-    return;
-  }
+  const win = getVisibleCellWindow();
 
-  // Build the list of visible cells. When ghost copies are enabled this
-  // is every integer offset whose world rectangle intersects the canvas;
-  // when disabled, only the cells inside the region are drawn so the user
-  // sees exactly their finite graph (e.g. just the 3x3 block).
-  const win        = getVisibleCellWindow();
-  const realCells  = [];
-  const ghostCells = [];
-  if (showGhosts) {
-    for (let i = win.minI; i <= win.maxI; i++) {
-      for (let j = win.minJ; j <= win.maxJ; j++) {
-        if (region.cellSet.has(i + ',' + j)) realCells.push({ i, j });
-        else                                 ghostCells.push({ i, j });
-      }
-    }
-  } else {
-    for (const c of region.cells) realCells.push(c);
-  }
+  // Layer 1: lattice cell backgrounds — every visible cell gets a faint
+  // outline so the periodic grid is visible everywhere.
+  drawLatticeGrid(win);
 
-  // Layer 1: backgrounds. Ghosts first (faint), real cells on top.
-  for (const c of ghostCells) drawCellBackground(c.i, c.j, true);
-  for (const c of realCells ) drawCellBackground(c.i, c.j, false);
+  // Layer 2: highlight the inside of the region shape with a brighter
+  // background so the user sees exactly which area is "in".
+  ctx.save();
+  regionPath();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.fill();
+  ctx.restore();
 
-  // Layer 2: edges. Ghosts first (faded), then real edges on top.
-  for (const c of ghostCells) drawCellEdges(c.i, c.j, win, true);
-  for (const c of realCells ) drawCellEdges(c.i, c.j, win, false);
+  // Layer 3: edges. Walk every visible cell, every edge in the data, and
+  // emit a line for the (i, j) translate of that edge.
+  drawAllEdges(win);
 
-  // Layer 3: dots.
-  for (const c of ghostCells) drawCellDots(c.i, c.j, true);
-  for (const c of realCells ) drawCellDots(c.i, c.j, false);
+  // Layer 4: dots. Same iteration but per dot, deciding real vs ghost
+  // based on whether the dot's world position is inside the region shape.
+  drawAllDots(win);
 
-  // Layer 4: bold outline of the fundamental cell, on top of everything.
-  drawCellBorder(region.fundamental.i, region.fundamental.j, '#232D4B', 2.5);
+  // Layer 5: bold outline of the fundamental cell so the user always
+  // knows where to click to edit dots.
+  drawFundamentalOutline();
+
+  // Layer 6: the region shape outline + resize handles, on top.
+  drawRegionShape();
 }
 
-function drawPotentialCells() {
-  // Compute the bounding window of cells we offer the user as "addable".
-  // Take the current region bounding box and pad it by 2 cells per side.
-  const bb   = regionBoundingBox();
-  const minI = Math.floor(bb.x0 / CELL_SIZE) - 2;
-  const maxI = Math.floor((bb.x1 - 1) / CELL_SIZE) + 2;
-  const minJ = Math.floor(bb.y0 / CELL_SIZE) - 2;
-  const maxJ = Math.floor((bb.y1 - 1) / CELL_SIZE) + 2;
-
-  ctx.save();
-  ctx.setLineDash([5, 4]);
-  ctx.strokeStyle = '#aaa';
+function drawLatticeGrid(win) {
+  ctx.strokeStyle = '#e6e2d6';
   ctx.lineWidth   = 1;
-  ctx.fillStyle   = '#fdfaf2';
-  for (let i = minI; i <= maxI; i++) {
-    for (let j = minJ; j <= maxJ; j++) {
-      if (region.cellSet.has(i + ',' + j)) continue;
-      const ox = i * CELL_SIZE;
-      const oy = j * CELL_SIZE;
-      const tl = worldToScreen({ x: ox,             y: oy });
-      const br = worldToScreen({ x: ox + CELL_SIZE, y: oy + CELL_SIZE });
+  ctx.fillStyle   = '#fbf7ec';
+  for (let i = win.minI; i <= win.maxI; i++) {
+    for (let j = win.minJ; j <= win.maxJ; j++) {
+      const tl = worldToScreen({ x: i       * CELL_SIZE, y: j       * CELL_SIZE });
+      const br = worldToScreen({ x: (i + 1) * CELL_SIZE, y: (j + 1) * CELL_SIZE });
       ctx.fillRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
       ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
     }
   }
-  ctx.restore();
 }
 
-function drawCellBackground(i, j, isGhost) {
-  const ox = i * CELL_SIZE;
-  const oy = j * CELL_SIZE;
-  const isFundamental = !isGhost &&
-    (i === region.fundamental.i && j === region.fundamental.j);
+function drawAllEdges(win) {
+  ctx.lineCap = 'round';
 
-  const tl = worldToScreen({ x: ox,             y: oy });
-  const br = worldToScreen({ x: ox + CELL_SIZE, y: oy + CELL_SIZE });
-
-  if (isGhost)            ctx.fillStyle = '#fbf7ec';
-  else if (isFundamental) ctx.fillStyle = '#ffffff';
-  else                    ctx.fillStyle = '#f7f2e7';
-  ctx.fillRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
-
-  if (!isFundamental) {
-    ctx.strokeStyle = isGhost ? '#e0dccf' : '#bbb';
-    ctx.lineWidth   = 1;
-    ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
-  }
-}
-
-function drawCellEdges(i, j, win, isGhost) {
-  const ox = i * CELL_SIZE;
-  const oy = j * CELL_SIZE;
-  ctx.strokeStyle = isGhost ? '#f2c999' : '#E57200';
-  ctx.lineWidth   = isGhost ? 1.5       : 2.4;
-  ctx.lineCap     = 'round';
-  for (const e of edges) {
-    // Only draw the edge if its neighboring cell is also being rendered.
-    // With ghosts on, the relevant universe is the viewport window; with
-    // ghosts off, it's strictly the region (so cross-region edges don't
-    // dangle into empty space).
-    const ni = i + e.dx;
-    const nj = j + e.dy;
-    const neighborOk = showGhosts
-      ? isCellInWindow(ni, nj, win)
-      : region.cellSet.has(ni + ',' + nj);
-    if (!neighborOk) continue;
-    const a = dotById(e.aId);
-    const b = dotById(e.bId);
-    const sp = worldToScreen({ x: a.x + ox,              y: a.y + oy });
-    const ep = worldToScreen({ x: b.x + ni * CELL_SIZE,  y: b.y + nj * CELL_SIZE });
-    ctx.beginPath();
-    ctx.moveTo(sp.x, sp.y);
-    ctx.lineTo(ep.x, ep.y);
-    ctx.stroke();
-  }
-}
-
-function drawCellDots(i, j, isGhost) {
-  const ox = i * CELL_SIZE;
-  const oy = j * CELL_SIZE;
-  ctx.globalAlpha = isGhost ? 0.5 : 1.0;
-  const r = isGhost ? DOT_RADIUS * 0.75 : DOT_RADIUS;
-  for (const d of dots) {
-    const sp = worldToScreen({ x: d.x + ox, y: d.y + oy });
-
-    // If this dot is the Connect-mode selection, draw a highlight halo
-    // underneath so every copy of the selected dot is visually marked.
-    if (connectSelection && connectSelection.dotId === d.id) {
-      ctx.beginPath();
-      ctx.arc(sp.x, sp.y, r + 5, 0, 2 * Math.PI);
-      ctx.fillStyle = '#E57200';
-      ctx.fill();
+  // When showing a matching, draw ONLY the matching edges — no background
+  // lines at all. This is the cleanest possible visual: the dots are still
+  // shown via drawAllDots, and the user sees exactly N_B thick orange
+  // lines, one per black dot, covering the entire matching and nothing
+  // else. Any line visible on screen is part of the matching, full stop.
+  if (shownMatching) {
+    ctx.strokeStyle = '#E57200';
+    ctx.lineWidth   = 5;
+    for (let i = win.minI; i <= win.maxI; i++) {
+      for (let j = win.minJ; j <= win.maxJ; j++) {
+        for (const e of edges) {
+          if (!shownMatching.has(edgeInstanceKey(e.aId, e.bId, e.dx, e.dy, i, j))) continue;
+          const ni = i + e.dx;
+          const nj = j + e.dy;
+          const a = dotById(e.aId);
+          const b = dotById(e.bId);
+          const sp = worldToScreen({ x: a.x + i * CELL_SIZE,  y: a.y + j * CELL_SIZE });
+          const ep = worldToScreen({ x: b.x + ni * CELL_SIZE, y: b.y + nj * CELL_SIZE });
+          ctx.beginPath();
+          ctx.moveTo(sp.x, sp.y);
+          ctx.lineTo(ep.x, ep.y);
+          ctx.stroke();
+        }
+      }
     }
-
-    ctx.beginPath();
-    ctx.arc(sp.x, sp.y, r, 0, 2 * Math.PI);
-    ctx.fillStyle   = d.color === 'B' ? '#232D4B' : '#ffffff';
-    ctx.fill();
-    ctx.strokeStyle = '#232D4B';
-    ctx.lineWidth   = isGhost ? 1 : 1.5;
-    ctx.stroke();
+    return;
   }
-  ctx.globalAlpha = 1.0;
+
+  // Default view (no matching shown): every edge, colored by whether both
+  // endpoints fall inside the region shape.
+  for (let i = win.minI; i <= win.maxI; i++) {
+    for (let j = win.minJ; j <= win.maxJ; j++) {
+      const ox = i * CELL_SIZE;
+      const oy = j * CELL_SIZE;
+      for (const e of edges) {
+        const ni = i + e.dx;
+        const nj = j + e.dy;
+        if (!isCellInWindow(ni, nj, win)) continue;
+        const a = dotById(e.aId);
+        const b = dotById(e.bId);
+        const aWx = a.x + ox;
+        const aWy = a.y + oy;
+        const bWx = b.x + ni * CELL_SIZE;
+        const bWy = b.y + nj * CELL_SIZE;
+        const inRegion = isPointInRegion(aWx, aWy) && isPointInRegion(bWx, bWy);
+        ctx.strokeStyle = inRegion ? '#E57200' : '#f2c999';
+        ctx.lineWidth   = inRegion ? 2.4       : 1.3;
+        const sp = worldToScreen({ x: aWx, y: aWy });
+        const ep = worldToScreen({ x: bWx, y: bWy });
+        ctx.beginPath();
+        ctx.moveTo(sp.x, sp.y);
+        ctx.lineTo(ep.x, ep.y);
+        ctx.stroke();
+      }
+    }
+  }
 }
 
-function drawCellBorder(i, j, color, width) {
-  const ox = i * CELL_SIZE;
-  const oy = j * CELL_SIZE;
+function drawAllDots(win) {
+  for (let i = win.minI; i <= win.maxI; i++) {
+    for (let j = win.minJ; j <= win.maxJ; j++) {
+      const ox = i * CELL_SIZE;
+      const oy = j * CELL_SIZE;
+      for (const d of dots) {
+        const wx = d.x + ox;
+        const wy = d.y + oy;
+        const inRegion = isPointInRegion(wx, wy);
+        const sp = worldToScreen({ x: wx, y: wy });
+
+        // Highlight halo for the Edit-Edges selection across every copy.
+        if (connectSelection && connectSelection.dotId === d.id) {
+          ctx.beginPath();
+          ctx.arc(sp.x, sp.y, DOT_RADIUS + 5, 0, 2 * Math.PI);
+          ctx.fillStyle = '#E57200';
+          ctx.fill();
+        }
+
+        ctx.globalAlpha = inRegion ? 1.0 : 0.45;
+        const r = inRegion ? DOT_RADIUS : DOT_RADIUS * 0.75;
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, r, 0, 2 * Math.PI);
+        ctx.fillStyle   = d.color === 'B' ? '#232D4B' : '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = '#232D4B';
+        ctx.lineWidth   = inRegion ? 1.5 : 1;
+        ctx.stroke();
+        ctx.globalAlpha = 1.0;
+      }
+    }
+  }
+}
+
+function drawFundamentalOutline() {
+  const ox = region.fundamental.i * CELL_SIZE;
+  const oy = region.fundamental.j * CELL_SIZE;
   const tl = worldToScreen({ x: ox,             y: oy });
   const br = worldToScreen({ x: ox + CELL_SIZE, y: oy + CELL_SIZE });
-  ctx.strokeStyle = color;
-  ctx.lineWidth   = width;
+  ctx.strokeStyle = '#232D4B';
+  ctx.lineWidth   = 2.5;
   ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+}
+
+function drawRegionShape() {
+  // Outline of the region shape.
+  ctx.save();
+  regionPath();
+  ctx.strokeStyle = '#1a5276';
+  ctx.lineWidth   = 2;
+  ctx.setLineDash([6, 4]);
+  ctx.stroke();
+  ctx.restore();
+
+  // Resize handles as small filled squares centered on each handle world
+  // point. They stay a fixed size in screen pixels regardless of zoom.
+  ctx.fillStyle   = '#1a5276';
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth   = 1.5;
+  for (const h of regionHandles()) {
+    const sp = worldToScreen({ x: h.x, y: h.y });
+    ctx.beginPath();
+    ctx.rect(sp.x - HANDLE_PX / 2, sp.y - HANDLE_PX / 2, HANDLE_PX, HANDLE_PX);
+    ctx.fill();
+    ctx.stroke();
+  }
 }
 
 // ============================================================================
@@ -1102,7 +1313,7 @@ function drawCellBorder(i, j, color, width) {
 
 function setMode(newMode) {
   mode = newMode;
-  for (const id of ['add-black', 'add-white', 'erase', 'edit-edges']) {
+  for (const id of ['add-black', 'add-white', 'move', 'erase', 'edit-edges']) {
     const btn = document.getElementById('btn-' + id);
     if (btn) btn.classList.toggle('active', id === newMode);
   }
@@ -1117,6 +1328,26 @@ function setToolHint(text, isError) {
   if (!el) return;
   el.textContent = text;
   el.classList.toggle('error', !!isError);
+}
+
+function setMatchingHint(text, isError) {
+  const el = document.getElementById('matching-hint');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('error', !!isError);
+}
+
+/**
+ * Clear any currently-shown matching. Called whenever the graph or the
+ * region changes, since the cached matching is no longer guaranteed to be
+ * valid (vertices may have moved into/out of the region, edges may have
+ * been added/removed).
+ */
+function invalidateMatching() {
+  if (shownMatching) {
+    shownMatching = null;
+    setMatchingHint('Matching cleared (the graph or region changed).', false);
+  }
 }
 
 /**
@@ -1149,24 +1380,21 @@ function findDotAtWorld(x, y) {
   return bestDot ? { dot: bestDot, i: bestI, j: bestJ } : null;
 }
 
-function toggleDrawRegion() {
-  drawingRegion = !drawingRegion;
-
-  // Button label and styling.
-  const btn = document.getElementById('btn-draw-region');
-  btn.textContent = drawingRegion ? 'Fix Region' : 'Draw Region';
-  btn.classList.toggle('active', drawingRegion);
-
-  // Disable dot tools while drawing the region — they don't make sense
-  // until the region is fixed.
-  for (const id of ['btn-add-black', 'btn-add-white', 'btn-edit-edges',
-                    'btn-erase', 'btn-auto-connect', 'btn-clear-edges',
-                    'btn-clear']) {
-    document.getElementById(id).disabled = drawingRegion;
+function countDotsInRegion() {
+  // Count distinct dot instances (across all visible cells) inside the
+  // region shape. Used for the Info panel.
+  const win = getVisibleCellWindow();
+  let n = 0;
+  for (let i = win.minI; i <= win.maxI; i++) {
+    for (let j = win.minJ; j <= win.maxJ; j++) {
+      const ox = i * CELL_SIZE;
+      const oy = j * CELL_SIZE;
+      for (const d of dots) {
+        if (isPointInRegion(d.x + ox, d.y + oy)) n++;
+      }
+    }
   }
-
-  fitView();
-  draw();
+  return n;
 }
 
 function updateStatus() {
@@ -1174,12 +1402,12 @@ function updateStatus() {
   const white = countByColor('W');
   const balanced = (black === white && dots.length > 0);
 
-  // Build a row in the stats panel: a label on the left, value on the right.
   const row = (label, value) =>
     `<div class="stat-line"><span class="stat-label">${label}</span>` +
     `<span>${value}</span></div>`;
 
-  // Balance — necessary condition for a perfect matching.
+  // Balance — necessary condition for a perfect matching of the
+  // fundamental-cell vertex multiset (#black == #white per copy).
   let balanceBadge;
   if (dots.length === 0) {
     balanceBadge = `<span class="badge">empty</span>`;
@@ -1190,7 +1418,6 @@ function updateStatus() {
     balanceBadge = `<span class="badge warn">need ${Math.abs(black - white)} ${need}</span>`;
   }
 
-  // Edges: show manual vs auto and (in manual mode) planarity.
   const modeBadge = manualEdit
     ? `<span class="badge info">manual</span>`
     : `<span class="badge">auto</span>`;
@@ -1203,13 +1430,12 @@ function updateStatus() {
   }
 
   document.getElementById('stats').innerHTML =
-    row('Black dots', `${black} / ${MAX_PAIRS}`) +
-    row('White dots', `${white} / ${MAX_PAIRS}`) +
-    row('Balance',    balanceBadge) +
-    row('Edges',      `${edges.length} ${modeBadge}${planarBadge}`) +
-    row('Cells',      region.cells.length);
+    row('Black dots',  `${black} / ${MAX_PAIRS}`) +
+    row('White dots',  `${white} / ${MAX_PAIRS}`) +
+    row('Balance',     balanceBadge) +
+    row('Edges (cell)', `${edges.length} ${modeBadge}${planarBadge}`) +
+    row('Dots in region', countDotsInRegion());
 
-  // Header badge mirrors the balance state for an at-a-glance summary.
   const badge = document.getElementById('status-badge');
   if (dots.length === 0)       { badge.textContent = 'Empty';      badge.className = ''; }
   else if (!balanced)          { badge.textContent = 'Unbalanced'; badge.className = 'invalid'; }
@@ -1219,14 +1445,6 @@ function updateStatus() {
 function handleClickAt(screenX, screenY) {
   const rect = canvas.getBoundingClientRect();
   const wp = screenToWorld({ x: screenX - rect.left, y: screenY - rect.top });
-
-  // Draw-region mode: clicks toggle whole cells in/out of the region.
-  if (drawingRegion) {
-    toggleCellAt(wp.x, wp.y);
-    updateStatus();
-    draw();
-    return;
-  }
 
   if (mode === 'edit-edges') {
     handleConnectClick(wp.x, wp.y);
@@ -1238,8 +1456,7 @@ function handleClickAt(screenX, screenY) {
   if (mode === 'erase') {
     removeDotNear(wp.x, wp.y);
   } else {
-    // Placement: only accept clicks inside the fundamental cell. Convert
-    // the world coordinate into the cell-local coordinate first.
+    // Placement: only accept clicks inside the fundamental cell.
     const fx = wp.x - region.fundamental.i * CELL_SIZE;
     const fy = wp.y - region.fundamental.j * CELL_SIZE;
     if (fx < 0 || fx > CELL_SIZE || fy < 0 || fy > CELL_SIZE) return;
@@ -1300,13 +1517,79 @@ function handleConnectClick(wx, wy) {
 function handleMouseDown(event) {
   downPoint    = { x: event.clientX, y: event.clientY };
   dragDistance = 0;
+
   // Right-button or Ctrl/Cmd + left-button = pan.
   if (event.button === 2 || event.ctrlKey || event.metaKey) {
     isPanning = true;
     panStart  = { x: event.clientX, y: event.clientY,
                   panX: view.panX,  panY: view.panY };
     event.preventDefault();
+    return;
   }
+
+  if (event.button !== 0) return;
+
+  // Test for region drag/resize. We do this BEFORE the dot tools so that
+  // grabbing a handle or the shape body wins over placing a dot inside it.
+  // Add-dot mode is exempted: clicks inside the fundamental cell should
+  // still place dots even when the region shape sits on top of it.
+  const rect = canvas.getBoundingClientRect();
+  const wp   = screenToWorld({ x: event.clientX - rect.left,
+                               y: event.clientY - rect.top });
+  const insideFundamental =
+    wp.x >= region.fundamental.i * CELL_SIZE &&
+    wp.x <= region.fundamental.i * CELL_SIZE + CELL_SIZE &&
+    wp.y >= region.fundamental.j * CELL_SIZE &&
+    wp.y <= region.fundamental.j * CELL_SIZE + CELL_SIZE;
+  const placingDot = (mode === 'add-black' || mode === 'add-white');
+
+  // Move-vertex mode: dragging a dot is the primary action.
+  if (mode === 'move') {
+    const hit = findDotAtWorld(wp.x, wp.y);
+    if (hit) {
+      vertexDrag = {
+        dotId: hit.dot.id,
+        startWorld: wp,
+        startLocal: { x: hit.dot.x, y: hit.dot.y }
+      };
+      canvas.style.cursor = 'grabbing';
+      event.preventDefault();
+      return;
+    }
+  }
+
+  // Resize handle has highest priority — small target, easy to mistake.
+  const handle = pickHandle(wp.x, wp.y);
+  if (handle) {
+    regionDrag = {
+      mode: 'resize-' + handle.name,
+      startWorld: wp,
+      original: cloneRegionGeom()
+    };
+    event.preventDefault();
+    return;
+  }
+
+  // Then the shape body — but skip if the user is trying to place a dot
+  // inside the fundamental cell (placement wins there).
+  if (isPointInRegion(wp.x, wp.y) && !(placingDot && insideFundamental)) {
+    regionDrag = {
+      mode: 'move',
+      startWorld: wp,
+      original: cloneRegionGeom()
+    };
+    event.preventDefault();
+    return;
+  }
+}
+
+function cloneRegionGeom() {
+  return {
+    rect:    { x: region.rect.x, y: region.rect.y,
+               w: region.rect.w, h: region.rect.h },
+    circle:  { cx: region.circle.cx, cy: region.circle.cy, r: region.circle.r },
+    polygon: { points: region.polygon.points.map(p => ({ x: p.x, y: p.y })) }
+  };
 }
 
 function handleMouseMove(event) {
@@ -1319,16 +1602,182 @@ function handleMouseMove(event) {
     view.panX = panStart.panX + (event.clientX - panStart.x);
     view.panY = panStart.panY + (event.clientY - panStart.y);
     draw();
+    return;
   }
+  if (regionDrag) {
+    const rect = canvas.getBoundingClientRect();
+    const wp   = screenToWorld({ x: event.clientX - rect.left,
+                                 y: event.clientY - rect.top });
+    applyRegionDrag(wp);
+    updateStatus();
+    draw();
+    return;
+  }
+  if (vertexDrag) {
+    const rect = canvas.getBoundingClientRect();
+    const wp   = screenToWorld({ x: event.clientX - rect.left,
+                                 y: event.clientY - rect.top });
+    applyVertexDrag(wp);
+    draw();
+    return;
+  }
+
+  // Update cursor as feedback for region grab/resize.
+  updateCanvasCursor(event);
 }
 
 function handleMouseUp(event) {
-  // A click is a mouseup with little drag, using the left button, not panning.
-  if (!isPanning && event.button === 0 && dragDistance < 5 && downPoint) {
+  const wasRegionDrag = !!regionDrag;
+  const wasVertexDrag = !!vertexDrag;
+  if (wasVertexDrag) {
+    finishVertexDrag();
+    invalidateMatching();   // a vertex moved inside the fundamental cell
+    updateStatus();
+    draw();
+  }
+  if (wasRegionDrag) {
+    invalidateMatching();   // the region shape moved or was resized
+    updateStatus();
+    draw();
+  }
+  // A click is a mouseup with little drag, using the left button, not
+  // panning, not in the middle of a region or vertex drag.
+  if (!isPanning && !wasRegionDrag && !wasVertexDrag && event.button === 0 &&
+      dragDistance < 5 && downPoint) {
     handleClickAt(event.clientX, event.clientY);
   }
-  isPanning = false;
-  downPoint = null;
+  isPanning  = false;
+  regionDrag = null;
+  downPoint  = null;
+}
+
+function applyRegionDrag(wp) {
+  const dx = wp.x - regionDrag.startWorld.x;
+  const dy = wp.y - regionDrag.startWorld.y;
+  const o  = regionDrag.original;
+  if (regionDrag.mode === 'move') {
+    if (region.type === 'rect') {
+      region.rect.x = o.rect.x + dx;
+      region.rect.y = o.rect.y + dy;
+    } else if (region.type === 'circle') {
+      region.circle.cx = o.circle.cx + dx;
+      region.circle.cy = o.circle.cy + dy;
+    } else if (region.type === 'polygon') {
+      region.polygon.points = o.polygon.points.map(p => ({ x: p.x + dx, y: p.y + dy }));
+    }
+  } else if (regionDrag.mode.startsWith('resize-')) {
+    const which = regionDrag.mode.slice(7);
+    if (region.type === 'rect') {
+      let { x, y, w, h } = o.rect;
+      if (which === 'nw') { x += dx; y += dy; w -= dx; h -= dy; }
+      if (which === 'ne') {           y += dy; w += dx; h -= dy; }
+      if (which === 'se') {                    w += dx; h += dy; }
+      if (which === 'sw') { x += dx;           w -= dx; h += dy; }
+      if (w < 20) { x = (which === 'nw' || which === 'sw') ? x + w - 20 : x; w = 20; }
+      if (h < 20) { y = (which === 'nw' || which === 'ne') ? y + h - 20 : y; h = 20; }
+      region.rect.x = x; region.rect.y = y; region.rect.w = w; region.rect.h = h;
+    } else if (region.type === 'circle' && which === 'r') {
+      const ddx = wp.x - o.circle.cx;
+      const ddy = wp.y - o.circle.cy;
+      region.circle.r = Math.max(20, Math.hypot(ddx, ddy));
+    } else if (region.type === 'polygon' && which.startsWith('v')) {
+      // Move only the dragged vertex; leave the others alone.
+      const idx = parseInt(which.slice(1), 10);
+      if (idx >= 0 && idx < o.polygon.points.length) {
+        region.polygon.points[idx] = {
+          x: o.polygon.points[idx].x + dx,
+          y: o.polygon.points[idx].y + dy
+        };
+      }
+    }
+  }
+}
+
+function updateCanvasCursor(event) {
+  const rect = canvas.getBoundingClientRect();
+  const wp   = screenToWorld({ x: event.clientX - rect.left,
+                               y: event.clientY - rect.top });
+  if (mode === 'move' && findDotAtWorld(wp.x, wp.y)) canvas.style.cursor = 'grab';
+  else if (pickHandle(wp.x, wp.y))                   canvas.style.cursor = 'nwse-resize';
+  else if (isPointInRegion(wp.x, wp.y))              canvas.style.cursor = 'move';
+  else                                               canvas.style.cursor = 'crosshair';
+}
+
+/**
+ * Double-click on the canvas in Polygon mode:
+ *   - double-click on/near a vertex  → remove it  (polygon keeps >= 3 vertices)
+ *   - double-click on/near an edge   → insert a new vertex at that point
+ * Anything else is ignored.
+ */
+function handleDoubleClick(event) {
+  if (region.type !== 'polygon') return;
+  const rect = canvas.getBoundingClientRect();
+  const wp   = screenToWorld({ x: event.clientX - rect.left,
+                               y: event.clientY - rect.top });
+
+  // Remove vertex if the user double-clicked directly on a handle.
+  const handle = pickHandle(wp.x, wp.y);
+  if (handle && handle.name.startsWith('v')) {
+    if (region.polygon.points.length <= 3) return;
+    const idx = parseInt(handle.name.slice(1), 10);
+    region.polygon.points.splice(idx, 1);
+    invalidateMatching();
+    draw();
+    updateStatus();
+    event.preventDefault();
+    return;
+  }
+
+  // Otherwise, try to insert a vertex on the closest edge within tolerance.
+  const pts   = region.polygon.points;
+  const tol   = (HANDLE_PX * 2) / view.scale;
+  const tolSq = tol * tol;
+  let bestIdx = -1, bestDistSq = Infinity, bestPt = null;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    const p = closestPointOnSegment(wp, a, b);
+    const dsq = (p.x - wp.x) ** 2 + (p.y - wp.y) ** 2;
+    if (dsq < bestDistSq) {
+      bestDistSq = dsq;
+      bestIdx    = i;
+      bestPt     = p;
+    }
+  }
+  if (bestIdx >= 0 && bestDistSq <= tolSq) {
+    region.polygon.points.splice(bestIdx + 1, 0, bestPt);
+    invalidateMatching();
+    draw();
+    updateStatus();
+    event.preventDefault();
+  }
+}
+
+function closestPointOnSegment(p, a, b) {
+  const vx = b.x - a.x, vy = b.y - a.y;
+  const len2 = vx * vx + vy * vy;
+  if (len2 === 0) return { x: a.x, y: a.y };
+  let t = ((p.x - a.x) * vx + (p.y - a.y) * vy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return { x: a.x + t * vx, y: a.y + t * vy };
+}
+
+function applyVertexDrag(wp) {
+  const dot = dotById(vertexDrag.dotId);
+  if (!dot) return;
+  // Delta in world coords == delta in cell-local coords (the cell offset
+  // cancels out). Add to original local position and clamp to the cell.
+  const dx = wp.x - vertexDrag.startWorld.x;
+  const dy = wp.y - vertexDrag.startWorld.y;
+  dot.x = Math.max(0, Math.min(CELL_SIZE, vertexDrag.startLocal.x + dx));
+  dot.y = Math.max(0, Math.min(CELL_SIZE, vertexDrag.startLocal.y + dy));
+}
+
+function finishVertexDrag() {
+  // After moving a vertex, rerun auto-connect (unless the user is in
+  // manual edge mode, in which case we leave their hand-built graph alone).
+  if (!manualEdit) recomputeEdges();
+  vertexDrag = null;
 }
 
 function handleWheel(event) {
@@ -1368,23 +1817,33 @@ function exportJson() {
 // ============================================================================
 
 function onShapeChanged() {
-  region.shape = document.getElementById('shape-select').value;
-  region.n = parseInt(document.getElementById('size-n').value, 10) || 1;
-  region.w = parseInt(document.getElementById('size-w').value, 10) || 1;
-  region.h = parseInt(document.getElementById('size-h').value, 10) || 1;
-  region.r = parseInt(document.getElementById('size-r').value, 10) || 0;
+  region.type = document.getElementById('shape-select').value;
+  invalidateMatching();
+  draw();
+  updateStatus();
+}
 
-  document.getElementById('row-square'   ).style.display =
-    region.shape === 'square'    ? 'inline' : 'none';
-  document.getElementById('row-rectangle').style.display =
-    region.shape === 'rectangle' ? 'inline' : 'none';
-  document.getElementById('row-diamond'  ).style.display =
-    region.shape === 'diamond'   ? 'inline' : 'none';
-
-  // 'custom' is a no-op here: cells are managed by hand in draw mode.
-  rebuildRegion();
+function recenterRegion() {
+  // Center the current shape on the fundamental cell.
+  const cx = region.fundamental.i * CELL_SIZE + CELL_SIZE / 2;
+  const cy = region.fundamental.j * CELL_SIZE + CELL_SIZE / 2;
+  if (region.type === 'rect') {
+    region.rect.x = cx - region.rect.w / 2;
+    region.rect.y = cy - region.rect.h / 2;
+  } else if (region.type === 'circle') {
+    region.circle.cx = cx;
+    region.circle.cy = cy;
+  } else if (region.type === 'polygon') {
+    // Reset the polygon to a default hexagon centered on the fundamental.
+    region.polygon.points = defaultHexagonPoints().map(p => ({
+      x: p.x + (cx - 1.5 * CELL_SIZE),
+      y: p.y + (cy - 1.5 * CELL_SIZE)
+    }));
+  }
+  invalidateMatching();
   fitView();
   draw();
+  updateStatus();
 }
 
 function init() {
@@ -1392,7 +1851,6 @@ function init() {
   ctx    = canvas.getContext('2d');
 
   resizeCanvas();
-  rebuildRegion();
   fitView();
 
   // Tool buttons.
@@ -1400,6 +1858,8 @@ function init() {
     () => setMode('add-black'));
   document.getElementById('btn-add-white').addEventListener('click',
     () => setMode('add-white'));
+  document.getElementById('btn-move').addEventListener('click',
+    () => setMode('move'));
   document.getElementById('btn-edit-edges').addEventListener('click', () => {
     startManualEditEdges();
     setMode('edit-edges');
@@ -1430,17 +1890,29 @@ function init() {
   document.getElementById('btn-export-png') .addEventListener('click', exportPng);
   document.getElementById('btn-export-json').addEventListener('click', exportJson);
 
-  // Region shape controls.
+  // Region controls.
   document.getElementById('shape-select').addEventListener('change', onShapeChanged);
-  for (const id of ['size-n', 'size-w', 'size-h', 'size-r']) {
-    document.getElementById(id).addEventListener('input', onShapeChanged);
-  }
-  document.getElementById('btn-draw-region').addEventListener('click', toggleDrawRegion);
+  document.getElementById('btn-recenter').addEventListener('click', recenterRegion);
 
-  // Show/hide ghost copies.
-  document.getElementById('show-ghosts').addEventListener('change', (e) => {
-    showGhosts = e.target.checked;
-    fitView();
+  // Matching controls.
+  document.getElementById('btn-show-matching').addEventListener('click', () => {
+    const result = findPerfectMatching();
+    if (!result.ok) {
+      shownMatching = null;
+      setMatchingHint(result.reason, true);
+      // Loud diagnostic: a perfect matching doesn't exist for this region,
+      // and it's easy to miss the red hint text. Surface the reason as an
+      // alert so the user immediately knows why nothing changed.
+      alert('No matching to show.\n\n' + result.reason);
+    } else {
+      shownMatching = result.matching;
+      setMatchingHint(`Showing a perfect matching with ${result.size} edges.`, false);
+    }
+    draw();
+  });
+  document.getElementById('btn-hide-matching').addEventListener('click', () => {
+    shownMatching = null;
+    setMatchingHint('');
     draw();
   });
 
@@ -1449,6 +1921,7 @@ function init() {
   canvas.addEventListener('mousemove',   handleMouseMove);
   canvas.addEventListener('mouseup',     handleMouseUp);
   canvas.addEventListener('mouseleave',  handleMouseUp);
+  canvas.addEventListener('dblclick',    handleDoubleClick);
   canvas.addEventListener('wheel',       handleWheel, { passive: false });
   canvas.addEventListener('contextmenu', e => e.preventDefault());
 

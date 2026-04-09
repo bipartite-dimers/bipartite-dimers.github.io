@@ -8,7 +8,7 @@ Live site: [bipartite-dimers.github.io](https://bipartite-dimers.github.io)
 
 - **[Lozenge Tiling Explorer](https://bipartite-dimers.github.io/lozenge.html)** — Draw regions on the triangular lattice and sample random lozenge tilings via Glauber dynamics. Includes Dinic's max-flow for the initial perfect matching, MCMC with q-volume bias, and a height-function view that renders each tiling as a 3D stepped surface of unit cubes.
 
-- **[Lattice Creator](https://bipartite-dimers.github.io/lattice.html)** — Design your own periodic bipartite planar graph. Place black and white dots in a fundamental cell (up to 10 of each color); the tool auto-connects them into a non-crossing bipartite graph and tiles the result across a finite region you choose (square, rectangle, diamond, or hand-drawn). Supports manual edge editing with planarity warnings, balance checking, and PNG/JSON export.
+- **[Lattice Creator](https://bipartite-dimers.github.io/lattice.html)** — Design your own periodic bipartite planar graph. Place black and white dots in a fundamental cell (up to 10 of each color); the tool auto-connects them into a non-crossing bipartite graph and tiles the lattice across the whole viewport. A draggable region shape (rectangle, circle, or free polygon) selects which dots form the finite graph. Supports manual edge editing with planarity warnings, balance checking, a "Show matching" feature that computes and displays one perfect matching of the induced subgraph, and PNG/JSON export.
 
 ## About
 
