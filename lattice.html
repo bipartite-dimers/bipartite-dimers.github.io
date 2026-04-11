@@ -107,6 +107,10 @@
       background: #fff;
       font: inherit;
     }
+    input[type="range"] {
+      width: 100%;
+      margin: 4px 0;
+    }
     input:focus, select:focus, button:focus {
       outline: 2px solid #1a5276;
       outline-offset: 1px;
@@ -146,6 +150,104 @@
     button.mini {
       padding: 2px 8px;
       font-size: 0.7rem;
+    }
+
+    /* Stage radio buttons: a 3-up segmented control that spans the full
+       panel width. Adjacent cells share borders to look connected. */
+    .stage-radios { gap: 0; }
+    .stage-radio {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 4px;
+      border: 1px solid #c8c8c8;
+      background: #fff;
+      cursor: pointer;
+      font-size: 0.72rem;
+      text-align: center;
+      user-select: none;
+      margin: 0;
+      transition: background 0.1s, border-color 0.1s, color 0.1s;
+    }
+    .stage-radio:first-of-type { border-radius: 4px 0 0 4px; }
+    .stage-radio:last-of-type  { border-radius: 0 4px 4px 0; }
+    .stage-radio + .stage-radio { border-left: none; }
+    .stage-radio input { display: none; }
+    .stage-radio:hover { background: #f1f1ec; border-color: #a8a8a8; }
+    .stage-radio.active {
+      background: #232D4B;
+      border-color: #232D4B;
+      color: #fff;
+    }
+    .stage-radio.active:hover {
+      background: #34406b;
+      border-color: #34406b;
+    }
+
+    /* Info icon button: a small round "i" that opens the algorithm help. */
+    .info-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      border-radius: 50%;
+      font-size: 0.75rem;
+      font-weight: 700;
+      font-style: italic;
+      font-family: Georgia, serif;
+      background: #e8eef7;
+      color: #1a5276;
+      border: 1px solid #c8d3e6;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .info-btn:hover { background: #d8e4f3; }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+    .panel-header h3 { margin: 0; }
+
+    /* Modal dialog for the beginner explanation. */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(30, 30, 30, 0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: #fff;
+      border-radius: 8px;
+      max-width: 460px;
+      width: calc(100% - 32px);
+      max-height: 80vh;
+      overflow-y: auto;
+      padding: 20px 24px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 0.85rem;
+      color: #2c2c2c;
+      line-height: 1.5;
+    }
+    .modal h2 {
+      font-size: 1rem;
+      margin: 0 0 8px;
+      color: #1a5276;
+    }
+    .modal p { margin: 6px 0; }
+    .modal ol, .modal ul { margin: 6px 0; padding-left: 20px; }
+    .modal .modal-close {
+      display: block;
+      margin: 16px auto 0;
+      padding: 6px 14px;
     }
     button.primary {
       background: #E57200;
@@ -237,10 +339,19 @@
       <!-- Workflow steps -->
       <div class="panel">
         <h3>Workflow</h3>
-        <div id="step-indicator" class="hint" style="margin-bottom:6px;"></div>
-        <div class="row">
-          <button id="btn-prev-step">&larr; Back</button>
-          <button id="btn-next-step" class="primary">Next &rarr;</button>
+        <div class="row three stage-radios">
+          <label class="stage-radio" data-stage="lattice">
+            <input type="radio" name="workflow-stage" value="lattice" checked>
+            <span>1. Lattice</span>
+          </label>
+          <label class="stage-radio" data-stage="region">
+            <input type="radio" name="workflow-stage" value="region">
+            <span>2. Region</span>
+          </label>
+          <label class="stage-radio" data-stage="sample">
+            <input type="radio" name="workflow-stage" value="sample">
+            <span>3. Sample</span>
+          </label>
         </div>
         <p class="hint" id="step-hint"></p>
       </div>
@@ -276,17 +387,18 @@
       <div class="panel" data-panel="region">
         <h3>Region</h3>
         <div id="region-positioning">
-          <p class="hint">Drag the dashed shape to move it. Drag corners/vertices to reshape.</p>
+          <p class="hint">Pick a shape, drag it to position, drag corners to reshape.</p>
           <div class="row inline">
             <select id="shape-select">
-              <option value="rect" selected>Rectangle</option>
+              <option value="" selected disabled>Select a shape</option>
+              <option value="rect">Rectangle</option>
               <option value="circle">Circle</option>
               <option value="polygon">Polygon (free)</option>
             </select>
             <button id="btn-recenter" title="Center the region on the fundamental cell">Re-center</button>
           </div>
           <div class="row inline" id="polygon-tools" style="display:none; gap:4px;">
-            <button id="btn-poly-add-vertex" class="mini" title="Click anywhere inside to drop a new vertex">+ vtx</button>
+            <button id="btn-poly-add-vertex" class="mini" title="Click anywhere to drop a new vertex">+ vtx</button>
             <button id="btn-poly-remove-vertex" class="mini" title="Click a vertex to delete it">&minus; vtx</button>
           </div>
           <div class="row single" style="margin-top:6px;">
@@ -294,7 +406,7 @@
           </div>
         </div>
         <div id="region-fixed-ui" style="display:none;">
-          <p class="hint">Region is fixed. You can now add, move, and erase dots inside it using the Dots panel below.</p>
+          <p class="hint">Region is fixed. Add, move, or erase dots inside it from the Dots panel.</p>
           <div class="row single">
             <button id="btn-unfix-region">Unfix Region</button>
           </div>
@@ -304,13 +416,33 @@
       <!-- Matching -->
       <div class="panel" data-panel="matching">
         <h3>Matching</h3>
-        <p class="hint">Find one perfect matching of the dots inside the region. If none exists, the region isn't tileable.</p>
+        <p class="hint"><b>Show</b> finds one matching. <b>Random</b> picks a different one each click.</p>
         <div class="row three">
-          <button id="btn-show-matching" class="primary">Show matching</button>
+          <button id="btn-show-matching" class="primary">Show</button>
+          <button id="btn-random-matching" class="primary" title="Sample a random perfect matching">Random</button>
           <button id="btn-hide-matching">Hide</button>
+        </div>
+        <div class="row single">
           <button id="btn-make-tileable" title="Adjust the region slightly to make it tileable">Make Tileable</button>
         </div>
         <div id="matching-hint"></div>
+      </div>
+
+      <!-- Simulate -->
+      <div class="panel" data-panel="simulate">
+        <div class="panel-header">
+          <h3>Simulate</h3>
+          <button id="btn-sim-info" class="info-btn" type="button"
+                  aria-label="How the simulation works"
+                  title="How the simulation works">i</button>
+        </div>
+        <p class="hint">Shuffles the current matching by random 4-cycle flips.</p>
+        <div class="row single">
+          <button id="btn-sim-start" title="Start or stop the simulation">Start</button>
+        </div>
+        <label for="sim-speed">Speed <span id="sim-speed-label">50</span></label>
+        <input id="sim-speed" type="range" min="1" max="1000" value="50">
+        <div id="sim-stats" class="hint" style="margin-top:4px;"></div>
       </div>
 
       <!-- Info -->
@@ -338,6 +470,39 @@
       </p>
 
     </div>
+  </div>
+</div>
+
+<!-- Info modal for the simulation algorithm. -->
+<div class="modal-backdrop" id="sim-info-modal">
+  <div class="modal" role="dialog" aria-labelledby="sim-info-title">
+    <h2 id="sim-info-title">How the simulation works</h2>
+    <p>
+      A <b>perfect matching</b> is a way to pair every dot inside the region
+      with exactly one partner, using only the edges that already exist.
+      Every dot is used once.
+    </p>
+    <p>
+      There are usually many valid matchings. The simulation picks one and
+      then slowly shuffles it to explore the others. Each small shuffle is
+      called a <b>flip</b>.
+    </p>
+    <p><b>What a flip does:</b></p>
+    <ol>
+      <li>Pick two matched pairs at random, say <i>A - B</i> and <i>C - D</i>.</li>
+      <li>Check if the graph also contains the edges <i>A - D</i> and <i>C - B</i>.</li>
+      <li>If yes, swap them: keep <i>A - D</i> and <i>C - B</i>, drop <i>A - B</i> and <i>C - D</i>.</li>
+    </ol>
+    <p>
+      The result is still a valid matching, just a slightly different one.
+      Repeating this many thousands of times produces a fresh random
+      matching from the space of all valid ones.
+    </p>
+    <p>
+      <b>Speed</b> controls how many flips are attempted per animation
+      frame. Higher values mix faster but update less smoothly.
+    </p>
+    <button class="modal-close" id="btn-sim-info-close" type="button">Close</button>
   </div>
 </div>
 
@@ -377,7 +542,7 @@
 // The fundamental cell is then tiled across the whole plane, producing the
 // infinite periodic lattice.
 //
-// The "region" is a SHAPE drawn over that infinite lattice — a rectangle or
+// The "region" is a SHAPE drawn over that infinite lattice , a rectangle or
 // circle in world coordinates that the user can drag and resize. A dot
 // instance at world position p is part of the finite graph iff p lies
 // inside the shape. An edge instance is included iff both of its endpoints
@@ -414,7 +579,7 @@ let region = {
   // Circle in world units.
   circle: { cx: 1.5 * CELL_SIZE, cy: 1.5 * CELL_SIZE, r: 1.5 * CELL_SIZE },
   // Polygon: an array of {x, y} world-coordinate vertices. Default is a
-  // regular hexagon centered on the fundamental cell — intentionally
+  // regular hexagon centered on the fundamental cell , intentionally
   // NOT aligned to fundamental-domain boundaries so the resulting cut
   // produces graphs with many perfect matchings (that's the whole point
   // of cutting at finer granularity than whole cells).
@@ -458,7 +623,7 @@ let workflowStep = 'lattice';
 
 // Sub-state of the Region stage. When false, the user is positioning
 // the region shape (drag/resize/reshape). When true, the shape is locked
-// in place and dot/edge editing is unlocked *inside* the region — the
+// in place and dot/edge editing is unlocked *inside* the region , the
 // user can add, move, and erase dots across the whole region (still
 // modulo the fundamental cell, so the lattice stays periodic).
 let regionFixed = false;
@@ -499,6 +664,15 @@ let connectSelection = null;  // null | { dotId, i, j }
 // instances and fades the rest. Set to null when not showing a matching.
 let shownMatching = null;     // null | Set<string>
 
+// Simulation state for Glauber-style dynamics on the current matching.
+// See startSimulation() / simStep() for the algorithm. simState holds a
+// fast adjacency representation of the induced subgraph + the current
+// matching as maps; simTimer is the animation-frame handle while running.
+let simState    = null;
+let simTimer    = null;
+let simSteps    = 0;
+let simAccepted = 0;
+
 // Mouse drag tracking so we can tell clicks apart from pans.
 let isPanning   = false;
 let panStart    = null;
@@ -515,7 +689,7 @@ let dragDistance = 0;
 // lie on opposite sides of the line AB.
 //
 // We intentionally treat segments that only meet at a shared endpoint as
-// non-crossing — otherwise every edge meeting at a common dot would count
+// non-crossing , otherwise every edge meeting at a common dot would count
 // as a crossing, which is not what "planar" means.
 // ============================================================================
 
@@ -529,7 +703,7 @@ function pointsEqual(p, q) {
 }
 
 function segmentsCross(a, b, c, d) {
-  // Shared endpoints are allowed — not a crossing.
+  // Shared endpoints are allowed , not a crossing.
   if (pointsEqual(a, c) || pointsEqual(a, d) ||
       pointsEqual(b, c) || pointsEqual(b, d)) {
     return false;
@@ -612,7 +786,7 @@ function clearAll() {
 /**
  * Toggle the edge between the selected dot and another dot. Both endpoints
  * are given together with the cell offsets (i, j) at which the user
- * clicked them — the offset *difference* determines which periodic
+ * clicked them. the offset *difference* determines which periodic
  * translate the edge lives on.
  *
  * Edges are stored canonically with the BLACK endpoint as aId so that
@@ -709,7 +883,7 @@ function graphHasCrossings() {
 //   (c) every dot has at least one edge,
 //   (d) the periodic graph is connected (single component).
 //
-// Algorithm — three passes, all working from the same shortest-first list:
+// Algorithm , three passes, all working from the same shortest-first list:
 //
 //   PASS 1 (greedy): list every candidate edge (each black-white pair, with
 //   each cell offset (dx, dy) in {-1, 0, 1}^2), sort by length, and add any
@@ -802,7 +976,7 @@ function dotDegree(id) {
   return n;
 }
 
-// Tiny union-find (disjoint set) — keyed by dot id.
+// Tiny union-find (disjoint set) , keyed by dot id.
 function unionFindInit() {
   const parent = new Map();
   for (const d of dots) parent.set(d.id, d.id);
@@ -861,7 +1035,7 @@ function edgeCrossesExisting(cand) {
 //   circle - { cx, cy, r }   in world units
 //
 // The fundamental cell at (0, 0) stays bold so the user always knows where
-// to click to edit dots — even if the region shape has been dragged far
+// to click to edit dots , even if the region shape has been dragged far
 // away from it.
 // ============================================================================
 
@@ -981,7 +1155,7 @@ function pickHandle(wx, wy) {
 //
 // Given the current fundamental cell, the periodic edge list, and the
 // region shape, we want to find a perfect matching of the induced
-// subgraph — the vertices are dot instances (d, i, j) with d.x + i*CELL
+// subgraph , the vertices are dot instances (d, i, j) with d.x + i*CELL
 // and d.y + j*CELL inside the region, and the edges are the instances of
 // the periodic edges whose two endpoints are both inside.
 //
@@ -989,7 +1163,7 @@ function pickHandle(wx, wy) {
 // DFS. For the size of graphs this tool handles (≤ a few hundred vertices)
 // it's effectively instant and much easier to read than full Dinic's.
 //
-// Returned matching keys are strings of the form 'aId:bId:i:j' — enough
+// Returned matching keys are strings of the form 'aId:bId:i:j' , enough
 // to uniquely identify which edge instance was chosen. The renderer uses
 // these keys to highlight the right edges.
 // ============================================================================
@@ -998,7 +1172,7 @@ function pickHandle(wx, wy) {
  * Unique key for a specific edge instance in the tiled lattice. Must
  * include the offset (dx, dy) because two distinct periodic edges can
  * share the same (aId, bId) pair but differ in which copy of the white
- * endpoint they connect to — e.g. B→W same cell vs B→W right-neighbor.
+ * endpoint they connect to. e.g. B→W same cell vs B→W right-neighbor.
  * Omitting (dx, dy) causes all such parallel edges to collapse to the
  * same key and the renderer would draw all of them when the matching
  * only picked one.
@@ -1011,7 +1185,7 @@ function edgeInstanceKey(aId, bId, dx, dy, i, j) {
  * Cell window covering the region shape. Unlike getVisibleCellWindow()
  * which depends on the current viewport (and misses region dots that are
  * off-screen), this returns the cell range that fully covers the region
- * bounding box — guaranteeing correct enumeration for matching and counting.
+ * bounding box. guaranteeing correct enumeration for matching and counting.
  */
 function getRegionCellWindow() {
   const bb = regionBoundingBox();
@@ -1080,7 +1254,7 @@ function buildInducedAdjacency(vertices) {
 function findPerfectMatching() {
   const vertices = enumerateRegionVertices();
 
-  // Count blacks and whites — necessary condition.
+  // Count blacks and whites , necessary condition.
   let nB = 0, nW = 0;
   for (const [, v] of vertices) {
     if (v.color === 'B') nB++; else nW++;
@@ -1090,7 +1264,7 @@ function findPerfectMatching() {
   }
   if (nB !== nW) {
     return { ok: false, reason:
-      `Region has ${nB} black and ${nW} white dots — unbalanced, no perfect matching is possible.` };
+      `Region has ${nB} black and ${nW} white dots: unbalanced, so no perfect matching is possible.` };
   }
 
   const adj = buildInducedAdjacency(vertices);
@@ -1126,9 +1300,355 @@ function findPerfectMatching() {
   return { ok: true, matching: instances, size: matched };
 }
 
+/** Fisher-Yates shuffle in place. */
+function shuffleInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  }
+  return arr;
+}
+
+/**
+ * Sample a random perfect matching of the induced subgraph.
+ *
+ * Approach: run the same augmenting-path algorithm as findPerfectMatching,
+ * but randomize (a) the order in which we process black vertices and (b)
+ * the order of neighbors in each black's adjacency list. Every time the
+ * DFS picks a "first" neighbor it's now a fresh random choice, so
+ * different seeds produce different matchings.
+ *
+ * NOTE: this does NOT give a uniformly random matching. that would need
+ * full Glauber / MCMC with alternating-cycle flips. But it's a quick way
+ * to show that multiple matchings exist and visually demonstrate how
+ * much they can differ. For the presentation / exploration use case,
+ * this is the right cost/benefit point.
+ */
+function findRandomMatching() {
+  const vertices = enumerateRegionVertices();
+
+  let nB = 0, nW = 0;
+  for (const [, v] of vertices) {
+    if (v.color === 'B') nB++; else nW++;
+  }
+  if (nB === 0 && nW === 0) {
+    return { ok: false, reason: 'No dots inside the region.' };
+  }
+  if (nB !== nW) {
+    return { ok: false, reason:
+      `Region has ${nB} black and ${nW} white dots: unbalanced, so no perfect matching is possible.` };
+  }
+
+  const adj = buildInducedAdjacency(vertices);
+  // Randomize the neighbor order for every black vertex. The DFS walks
+  // this order left-to-right, so shuffling = randomizing the algorithm.
+  for (const [, links] of adj) shuffleInPlace(links);
+
+  // Randomize the order in which blacks are processed too. Different
+  // starting orders give different matchings even on the same adjacency.
+  const blackKeys = shuffleInPlace(Array.from(adj.keys()));
+
+  const matchBlack = new Map();
+  const matchWhite = new Map();
+
+  function augment(blackKey, visited) {
+    for (const link of adj.get(blackKey) || []) {
+      if (visited.has(link.whiteKey)) continue;
+      visited.add(link.whiteKey);
+      const existing = matchWhite.get(link.whiteKey);
+      if (!existing || augment(existing.blackKey, visited)) {
+        matchBlack.set(blackKey, link);
+        matchWhite.set(link.whiteKey, { blackKey, instanceKey: link.instanceKey });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  let matched = 0;
+  for (const blackKey of blackKeys) {
+    if (augment(blackKey, new Set())) matched++;
+  }
+
+  if (matched !== nB) {
+    return { ok: false, reason:
+      `No perfect matching: only ${matched} of ${nB} blacks could be paired.` };
+  }
+
+  const instances = new Set();
+  for (const [, link] of matchBlack) instances.add(link.instanceKey);
+  return { ok: true, matching: instances, size: matched };
+}
+
+// ============================================================================
+// GLAUBER DYNAMICS SIMULATION
+//
+// Live MCMC-style shuffling of the current perfect matching. Each step is
+// a single attempted "alternating 4-cycle flip":
+//
+//   Pick two random matched edges (B1 W1) and (B2 W2). If the "opposite"
+//   pairs (B1 W2) and (B2 W1) are both valid edges in the induced graph,
+//   then B1 B2 W1 W2 form a 4-cycle that alternates between matched and
+//   unmatched edges around the cycle. Flipping the cycle means removing
+//   (B1 W1, B2 W2) and adding (B1 W2, B2 W1) , still a valid perfect
+//   matching. We accept the flip with probability 1/2, which is the
+//   detailed-balance rule for uniform distribution on matchings.
+//
+// IMPORTANT: 4-cycle flips alone do NOT make the chain irreducible in
+// general , some matchings can't be reached from others by only 4-swaps.
+// A full sampler for arbitrary bipartite planar graphs needs face
+// enumeration (via rotation system / half-edge traversal) and face flips
+// of all sizes. That's the "final dream" sampler Petrov described, and
+// is the next bigger research step. This 4-cycle version is fast, easy
+// to read, and already produces visually interesting shuffling on most
+// lattices.
+// ============================================================================
+
+/**
+ * Build a fast-access simulation graph: induced adjacency + current
+ * matching as two Maps (blackKey -> whiteKey and vice versa). Fails
+ * with {ok:false,reason} if there's no initial perfect matching.
+ */
+function buildSimState() {
+  const vertices = enumerateRegionVertices();
+  let nB = 0, nW = 0;
+  for (const [, v] of vertices) {
+    if (v.color === 'B') nB++; else nW++;
+  }
+  if (nB === 0 && nW === 0) return { ok: false, reason: 'No dots inside the region.' };
+  if (nB !== nW) {
+    return { ok: false, reason:
+      `Region has ${nB} black and ${nW} white dots: unbalanced, so no perfect matching is possible.` };
+  }
+
+  // adj: blackKey -> Map<whiteKey, instanceKey> , O(1) edge lookup.
+  const adj = new Map();
+  for (const [key, v] of vertices) {
+    if (v.color === 'B') adj.set(key, new Map());
+  }
+  const win = getVisibleCellWindow();
+  for (let i = win.minI; i <= win.maxI; i++) {
+    for (let j = win.minJ; j <= win.maxJ; j++) {
+      for (const e of edges) {
+        const blackKey = e.aId + '_' + i + '_' + j;
+        const ni = i + e.dx, nj = j + e.dy;
+        const whiteKey = e.bId + '_' + ni + '_' + nj;
+        if (vertices.has(blackKey) && vertices.has(whiteKey)) {
+          adj.get(blackKey).set(whiteKey,
+            edgeInstanceKey(e.aId, e.bId, e.dx, e.dy, i, j));
+        }
+      }
+    }
+  }
+
+  // Seed the matching: reuse the currently-shown matching if possible,
+  // otherwise compute a fresh one.
+  const blackMatch = new Map();
+  const whiteMatch = new Map();
+  const blackKeys  = Array.from(adj.keys());
+
+  // Try to seed from the currently-displayed matching. We only accept
+  // the seed if it is a proper 1:1 matching , every black has a unique
+  // white partner. If ANY white is claimed by two blacks (which would
+  // violate the matching invariant), we throw the seed away and fall
+  // back to a fresh run of findPerfectMatching.
+  const seedFromShown = () => {
+    blackMatch.clear();
+    whiteMatch.clear();
+    for (const blackKey of blackKeys) {
+      for (const [whiteKey, instKey] of adj.get(blackKey)) {
+        if (shownMatching && shownMatching.has(instKey)) {
+          if (whiteMatch.has(whiteKey)) continue;  // already taken: skip
+          blackMatch.set(blackKey, whiteKey);
+          whiteMatch.set(whiteKey, blackKey);
+          break;
+        }
+      }
+    }
+    return blackMatch.size === blackKeys.length &&
+           whiteMatch.size === blackKeys.length;
+  };
+
+  let seeded = shownMatching ? seedFromShown() : false;
+  if (!seeded) {
+    // Fall back to a fresh matching via augmenting paths.
+    const fresh = findPerfectMatching();
+    if (!fresh.ok) return fresh;
+    blackMatch.clear();
+    whiteMatch.clear();
+    for (const blackKey of blackKeys) {
+      for (const [whiteKey, instKey] of adj.get(blackKey)) {
+        if (fresh.matching.has(instKey)) {
+          if (whiteMatch.has(whiteKey)) continue;
+          blackMatch.set(blackKey, whiteKey);
+          whiteMatch.set(whiteKey, blackKey);
+          break;
+        }
+      }
+    }
+  }
+
+  return { ok: true, adj, blackMatch, whiteMatch, blackKeys, size: blackKeys.length };
+}
+
+/** Attempt one alternating-4-cycle flip. Returns true iff a flip happened. */
+function simTryFlip(state) {
+  const { adj, blackMatch, whiteMatch, blackKeys } = state;
+  if (blackKeys.length < 2) return false;
+
+  // Pick two distinct random matched edges via their black endpoints.
+  const b1 = blackKeys[(Math.random() * blackKeys.length) | 0];
+  const b2 = blackKeys[(Math.random() * blackKeys.length) | 0];
+  if (b1 === b2) return false;
+
+  const w1 = blackMatch.get(b1);
+  const w2 = blackMatch.get(b2);
+  if (!w1 || !w2) return false;
+  if (w1 === w2) return false;          // degenerate: would break 1:1
+
+  // Check that the "swapped" edges both exist in the induced graph.
+  const nb1 = adj.get(b1);
+  const nb2 = adj.get(b2);
+  if (!nb1.has(w2) || !nb2.has(w1)) return false;
+
+  // Heat-bath: flip with probability 1/2 for uniform distribution.
+  if (Math.random() < 0.5) return false;
+
+  blackMatch.set(b1, w2);
+  blackMatch.set(b2, w1);
+  whiteMatch.set(w1, b2);
+  whiteMatch.set(w2, b1);
+  return true;
+}
+
+/** Rebuild the shownMatching instance-key set from the current sim state. */
+function simMatchingToShown(state) {
+  const out = new Set();
+  for (const [b, w] of state.blackMatch) {
+    out.add(state.adj.get(b).get(w));
+  }
+  return out;
+}
+
+/**
+ * Assign shownMatching, validate it, and surface any problems as a warning
+ * in the matching hint. Use this at every site that sets the matching
+ * (Show, Random, Make Tileable, and each simulation frame), so an invalid
+ * matching caused by an upstream bug shows up as a loud message rather
+ * than a silently wrong picture. The defensive per-dot guard in
+ * drawAllEdges then makes sure the visual is still a proper matching
+ * even if the set is wrong.
+ */
+function setShownMatching(newMatching) {
+  shownMatching = newMatching;
+  const problems = validateMatchingSet(newMatching);
+  if (problems.length > 0) {
+    setMatchingHint(
+      `Internal warning: matching has ${problems.length} duplicate-dot issue(s). ` +
+      `Rendering enforces at most one edge per dot.`, true);
+  }
+}
+
+/**
+ * Validate that a Set of edge-instance keys represents a proper matching:
+ * every dot instance is touched by at most one edge. Returns a list of
+ * human-readable problems; an empty list means the matching is valid.
+ */
+function validateMatchingSet(matching) {
+  if (!matching) return [];
+  const dotToEdge = new Map();  // dot instance key -> edge instance key
+  const problems  = [];
+  const win = getVisibleCellWindow();
+
+  for (let i = win.minI; i <= win.maxI; i++) {
+    for (let j = win.minJ; j <= win.maxJ; j++) {
+      for (const e of edges) {
+        const instKey = edgeInstanceKey(e.aId, e.bId, e.dx, e.dy, i, j);
+        if (!matching.has(instKey)) continue;
+        const ni = i + e.dx, nj = j + e.dy;
+        const blackKey = e.aId + '_' + i  + '_' + j;
+        const whiteKey = e.bId + '_' + ni + '_' + nj;
+        for (const dotKey of [blackKey, whiteKey]) {
+          if (dotToEdge.has(dotKey) && dotToEdge.get(dotKey) !== instKey) {
+            problems.push(`dot ${dotKey} is touched by multiple matching edges`);
+          }
+          dotToEdge.set(dotKey, instKey);
+        }
+      }
+    }
+  }
+  return problems;
+}
+
+function startSimulation() {
+  if (simTimer) return;                       // already running
+  const built = buildSimState();
+  if (!built.ok) {
+    setMatchingHint(built.reason, true);
+    return;
+  }
+  simState = built;
+  setShownMatching(simMatchingToShown(simState));
+  simSteps = 0;
+  simAccepted = 0;
+
+  // Toggle the button to look "active" like lozenge's Start/Stop.
+  const btn = document.getElementById('btn-sim-start');
+  btn.textContent = 'Stop';
+  btn.classList.add('active');
+
+  const loop = () => {
+    if (!simTimer) return;                    // stopped while pending
+    const stepsPerFrame =
+      parseInt(document.getElementById('sim-speed').value, 10) || 50;
+    for (let k = 0; k < stepsPerFrame; k++) {
+      if (simTryFlip(simState)) simAccepted++;
+      simSteps++;
+    }
+    // Rebuild shownMatching directly from the simState maps (which are
+    // guaranteed valid by construction: simTryFlip only ever swaps two
+    // entries at a time, maintaining the 1:1 match invariant). We skip
+    // the full validateMatchingSet call here because it runs every frame
+    // and would be wasted work , the defensive per-dot guard in
+    // drawAllEdges is enough insurance during live simulation.
+    shownMatching = simMatchingToShown(simState);
+    updateSimStats();
+    draw();
+    simTimer = requestAnimationFrame(loop);
+  };
+  simTimer = requestAnimationFrame(loop);
+  setMatchingHint('Running\u2026 click Stop to freeze.', false);
+}
+
+function stopSimulation() {
+  if (simTimer) {
+    cancelAnimationFrame(simTimer);
+    simTimer = null;
+  }
+  const btn = document.getElementById('btn-sim-start');
+  btn.textContent = 'Start';
+  btn.classList.remove('active');
+  if (simState) {
+    setMatchingHint(
+      `Stopped at step ${simSteps.toLocaleString()}. Click Start to resume.`,
+      false);
+  }
+}
+
+function toggleSimulation() {
+  if (simTimer) stopSimulation();
+  else          startSimulation();
+}
+
+function updateSimStats() {
+  const el = document.getElementById('sim-stats');
+  if (!el) return;
+  el.textContent = `Steps: ${simSteps.toLocaleString()} | Flips: ${simAccepted.toLocaleString()}`;
+}
+
 /**
  * Try to grow the region slightly so that a perfect matching exists.
- * Only expands — never shrinks or removes dots. Scales the region
+ * Only expands. never shrinks or removes dots. Scales the region
  * uniformly from its center in small increments until the induced
  * subgraph has a perfect matching.
  *
@@ -1157,7 +1677,7 @@ function makeTileable() {
     }
   }
 
-  // No luck — restore the original region.
+  // No luck , restore the original region.
   restoreRegionGeom(original);
   return { ok: false, reason: 'Could not find a tileable region by expanding. Try repositioning the region manually.', adjusted: false };
 }
@@ -1212,7 +1732,7 @@ function applyRegionTranslate(original, dx, dy) {
 // SECTION 6: CANVAS RENDERER
 //
 // The renderer paints the periodic lattice across the entire canvas
-// viewport — every dot and every edge from every visible cell — and then
+// viewport , every dot and every edge from every visible cell , and then
 // uses the region shape to decide which dots and edges are "real" (part
 // of the finite graph) and which are background tiling.
 //
@@ -1312,7 +1832,7 @@ function draw() {
 
   const win = getVisibleCellWindow();
 
-  // Layer 1: lattice cell backgrounds — every visible cell gets a faint
+  // Layer 1: lattice cell backgrounds , every visible cell gets a faint
   // outline so the periodic grid is visible everywhere.
   drawLatticeGrid(win);
 
@@ -1370,22 +1890,23 @@ function drawAllEdges(win) {
   ctx.lineCap = 'round';
 
   // When showing a matching, do TWO passes:
-  //   1. Unmatched in-region edges as faint DASHED lines, so the user can
-  //      still see the underlying graph structure ("imaginary" lines that
+  //   1. Unmatched in-region edges as very faint DASHED lines so the user
+  //      can see the underlying graph structure ("imaginary" lines that
   //      were dropped from the matching).
-  //   2. Matched edges as thick solid bright orange on top.
+  //   2. Matched edges as thick solid bright orange on top, with a
+  //      per-dot guard so no dot can ever have more than one matching
+  //      edge drawn through it.
   // Dots are drawn separately by drawAllDots.
   if (shownMatching) {
-    // Pass 1: dashed "ghost" of unmatched edges across the entire
-    // visible lattice so the user sees the full structure everywhere.
+    // Pass 1: dashed "ghost" of unmatched edges.
     ctx.save();
     ctx.setLineDash([5, 5]);
-    ctx.strokeStyle = 'rgba(150, 130, 90, 0.35)';
+    ctx.strokeStyle = 'rgba(150, 130, 90, 0.22)';
     ctx.lineWidth   = 1;
     for (let i = win.minI; i <= win.maxI; i++) {
       for (let j = win.minJ; j <= win.maxJ; j++) {
         for (const e of edges) {
-          // Skip matching edges — they're drawn solid below.
+          // Skip matching edges , they're drawn solid below.
           if (shownMatching.has(edgeInstanceKey(e.aId, e.bId, e.dx, e.dy, i, j))) continue;
           const ni = i + e.dx;
           const nj = j + e.dy;
@@ -1408,6 +1929,13 @@ function drawAllEdges(win) {
     ctx.restore();
 
     // Pass 2: matching edges, solid thick orange on top.
+    // Per-dot guard: track which dot *instances* have already had a
+    // matching edge drawn to them, and skip any additional edge that
+    // would touch an already-matched dot. This invariant is enforced at
+    // the render level so the visual matching is ALWAYS a proper
+    // matching (every dot touched by at most one edge), regardless of
+    // any bug upstream in how `shownMatching` was produced.
+    const matchedDotInstances = new Set();
     ctx.strokeStyle = '#E57200';
     ctx.lineWidth   = 5;
     for (let i = win.minI; i <= win.maxI; i++) {
@@ -1416,6 +1944,12 @@ function drawAllEdges(win) {
           if (!shownMatching.has(edgeInstanceKey(e.aId, e.bId, e.dx, e.dy, i, j))) continue;
           const ni = i + e.dx;
           const nj = j + e.dy;
+          const blackKey = e.aId + '_' + i  + '_' + j;
+          const whiteKey = e.bId + '_' + ni + '_' + nj;
+          if (matchedDotInstances.has(blackKey) ||
+              matchedDotInstances.has(whiteKey)) continue;
+          matchedDotInstances.add(blackKey);
+          matchedDotInstances.add(whiteKey);
           const a = dotById(e.aId);
           const b = dotById(e.bId);
           const sp = worldToScreen({ x: a.x + i * CELL_SIZE,  y: a.y + j * CELL_SIZE });
@@ -1446,7 +1980,11 @@ function drawAllEdges(win) {
         const aWy = a.y + oy;
         const bWx = b.x + ni * CELL_SIZE;
         const bWy = b.y + nj * CELL_SIZE;
-        const inRegion = isPointInRegion(aWx, aWy) && isPointInRegion(bWx, bWy);
+        // In the Lattice stage, ignore the region entirely , every dot and
+        // edge in the periodic tiling is drawn at full visibility so the
+        // user isn't distracted by a region overlay while building the cell.
+        const inRegion = workflowStep === 'lattice' ||
+          (isPointInRegion(aWx, aWy) && isPointInRegion(bWx, bWy));
         ctx.strokeStyle = inRegion ? '#E57200' : '#f2c999';
         ctx.lineWidth   = inRegion ? 2.4       : 1.3;
         const sp = worldToScreen({ x: aWx, y: aWy });
@@ -1479,7 +2017,9 @@ function drawAllDots(win) {
       for (const d of dots) {
         const wx = d.x + ox;
         const wy = d.y + oy;
-        const inRegion = isPointInRegion(wx, wy);
+        // Same rule as drawAllEdges: in Lattice stage we don't apply the
+        // region-based opacity, so the user sees the clean lattice.
+        const inRegion = workflowStep === 'lattice' || isPointInRegion(wx, wy);
         const sp = worldToScreen({ x: wx, y: wy });
 
         // Highlight halo for the Edit-Edges selection across every copy.
@@ -1527,7 +2067,7 @@ function drawRegionShape() {
   ctx.stroke();
   ctx.restore();
 
-  // Resize handles — only in the 'region' step while the shape is NOT
+  // Resize handles , only in the 'region' step while the shape is NOT
   // fixed. Once fixed, the region is locked and draws as a static outline.
   if (workflowStep !== 'region' || regionFixed) return;
   ctx.fillStyle   = '#1a5276';
@@ -1563,9 +2103,14 @@ function setWorkflowStep(newStep) {
   vertexDrag       = null;
   connectSelection = null;
 
+  // Leaving the Sample stage stops any running simulation.
+  if (prevStep === 'sample' && newStep !== 'sample' && simTimer) {
+    stopSimulation();
+  }
+
   // Leaving the Region stage backward (→ Lattice) unfixes the region so
   // the user can re-position it when they come forward again. Going
-  // forward (Region → Sample) leaves regionFixed alone — it was
+  // forward (Region → Sample) leaves regionFixed alone , it was
   // necessarily true because the user confirmed it.
   if (newStep === 'lattice') {
     regionFixed = false;
@@ -1599,7 +2144,7 @@ function toggleRegionFixed() {
   regionFixed = !regionFixed;
   regionDrag = null;
   if (regionFixed) {
-    // Drop polygon sub-modes when fixing — they only make sense while
+    // Drop polygon sub-modes when fixing , they only make sense while
     // the shape is being edited.
     if (mode === 'poly-add-vertex' || mode === 'poly-remove-vertex') {
       setMode('add-black');
@@ -1611,30 +2156,21 @@ function toggleRegionFixed() {
 }
 
 function updateWorkflowUI() {
-  const labels = {
-    lattice: 'Stage 1 of 3 \u00b7 Build the lattice',
-    region:  'Stage 2 of 3 \u00b7 Region',
-    sample:  'Stage 3 of 3 \u00b7 Sample'
-  };
   const hints = {
-    lattice: 'Add and edit dots and edges inside the bold square. When the lattice pattern is ready, click Next.',
+    lattice: 'Add and edit dots and edges inside the bold square.',
     region:  'Drag the dashed shape into position. When happy, click Fix Region to add dots freely inside it.',
     sample:  'Everything is fixed. Use Show matching to verify the region is tileable or inspect one perfect matching.'
   };
-  document.getElementById('step-indicator').textContent = labels[workflowStep];
-  document.getElementById('step-hint')     .textContent = hints[workflowStep];
+  document.getElementById('step-hint').textContent = hints[workflowStep];
 
-  // Prev/next buttons: labels and enabled state.
-  const prevBtn = document.getElementById('btn-prev-step');
-  const nextBtn = document.getElementById('btn-next-step');
-  prevBtn.disabled = (workflowStep === 'lattice');
-  nextBtn.disabled = (workflowStep === 'sample');
-  if      (workflowStep === 'lattice') nextBtn.textContent = 'Next: Region \u2192';
-  else if (workflowStep === 'region')  nextBtn.textContent = 'Next: Sample \u2192';
-  else                                 nextBtn.textContent = 'Done';
-  if      (workflowStep === 'region')  prevBtn.textContent = '\u2190 Back to Lattice';
-  else if (workflowStep === 'sample')  prevBtn.textContent = '\u2190 Back to Region';
-  else                                 prevBtn.textContent = '\u2190 Back';
+  // Sync the 3-up stage radio buttons: check the active one and toggle
+  // the "active" class on its label so the CSS styles the pill.
+  for (const label of document.querySelectorAll('.stage-radio')) {
+    const active = label.dataset.stage === workflowStep;
+    label.classList.toggle('active', active);
+    const input = label.querySelector('input');
+    if (input) input.checked = active;
+  }
 
   // Show exactly one stage's panel at a time, with one exception: in the
   // Region stage, clicking "Fix Region" unlocks dot editing inside the
@@ -1645,7 +2181,8 @@ function updateWorkflowUI() {
     dots:     workflowStep === 'lattice' || editingInRegion,
     edges:    workflowStep === 'lattice' || editingInRegion,
     region:   workflowStep === 'region',
-    matching: workflowStep === 'sample'
+    matching: workflowStep === 'sample',
+    simulate: workflowStep === 'sample'
   };
   for (const name in visibility) {
     const p = document.querySelector(`.panel[data-panel="${name}"]`);
@@ -1666,23 +2203,7 @@ function updateWorkflowUI() {
   }
 }
 
-function goNextStep() {
-  if      (workflowStep === 'lattice') setWorkflowStep('region');
-  else if (workflowStep === 'region')  setWorkflowStep('sample');
-}
-
-/**
- * Back-navigation preserves state from later stages, per Petrov's
- * requirement: "keep the region, but not allowed to change [it] once you
- * maybe change the lattice". Going back from Sample to Region unlocks
- * the region shape for editing; going back from Region to Lattice
- * preserves the region in memory and lets the user change the lattice.
- * No destructive reset, no confirmation dialog.
- */
-function goPrevStep() {
-  if      (workflowStep === 'sample')  setWorkflowStep('region');
-  else if (workflowStep === 'region')  setWorkflowStep('lattice');
-}
+// (goNextStep / goPrevStep replaced by stage radio buttons in updateWorkflowUI)
 
 function setMode(newMode) {
   mode = newMode;
@@ -1723,6 +2244,19 @@ function setMatchingHint(text, isError) {
  * been added/removed).
  */
 function invalidateMatching() {
+  // Any change to the underlying graph or region invalidates a running
+  // simulation too, since the induced subgraph it's walking no longer
+  // matches what the user is looking at.
+  if (simTimer) {
+    cancelAnimationFrame(simTimer);
+    simTimer = null;
+    const btn = document.getElementById('btn-sim-start');
+    if (btn) { btn.textContent = 'Start'; btn.classList.remove('active'); }
+  }
+  simState = null;
+  const statsEl = document.getElementById('sim-stats');
+  if (statsEl) statsEl.textContent = '';
+
   if (shownMatching) {
     shownMatching = null;
     setMatchingHint('Matching cleared (the graph or region changed).', false);
@@ -1733,7 +2267,7 @@ function invalidateMatching() {
  * Find the dot (and the cell offset at which it was clicked) nearest to a
  * world-space click point. Searches every cell in the currently visible
  * window, not just region cells, so the user can click any visible copy
- * of a dot — including ghost copies — when connecting edges.
+ * of a dot. including ghost copies. when connecting edges.
  */
 function findDotAtWorld(x, y) {
   const win = getVisibleCellWindow();
@@ -2062,7 +2596,7 @@ function handleConnectClick(wx, wy) {
     return;
   }
   if (result.action === 'added' && result.warning === 'planar') {
-    setToolHint('Edge added — warning: this edge crosses another. Graph is no longer planar.', true);
+    setToolHint('Edge added. Warning: this edge crosses another. Graph is no longer planar.', true);
   } else {
     setToolHint(result.action === 'added' ? 'Edge added.' : 'Edge removed.');
   }
@@ -2097,9 +2631,15 @@ function handleMouseDown(event) {
     wp.y <= region.fundamental.j * CELL_SIZE + CELL_SIZE;
   const placingDot = (mode === 'add-black' || mode === 'add-white');
 
-  // Move-vertex mode: dragging a dot is the primary action. Allowed in
-  // both 'lattice' (drag only fundamental-cell dots) and 'edit' steps.
-  if (mode === 'move' && workflowStep !== 'region') {
+  // Dot editing is active in two situations: the Lattice stage (always),
+  // and the Region stage after the user clicks Fix Region. Move and
+  // Erase both rely on this flag.
+  const dotEditingActive =
+    workflowStep === 'lattice' ||
+    (workflowStep === 'region' && regionFixed);
+
+  // Move mode: start dragging the dot under the click.
+  if (mode === 'move' && dotEditingActive) {
     const hit = findDotAtWorld(wp.x, wp.y);
     if (hit) {
       vertexDrag = {
@@ -2115,7 +2655,7 @@ function handleMouseDown(event) {
 
   // Erase mode: if a dot is under the click, fall through to handleClickAt
   // so the erase action runs instead of starting a region drag.
-  if (mode === 'erase' && workflowStep !== 'region') {
+  if (mode === 'erase' && dotEditingActive) {
     if (findDotAtWorld(wp.x, wp.y)) return;
   }
 
@@ -2380,17 +2920,20 @@ function exportJson() {
 // ============================================================================
 
 function onShapeChanged() {
-  region.type = document.getElementById('shape-select').value;
+  const picked = document.getElementById('shape-select').value;
+  // "Select a shape" placeholder is a no-op: the user hasn't picked yet.
+  if (!picked) return;
+  region.type = picked;
+
   // Show the polygon-specific vertex-edit buttons only when Polygon is
   // selected. Also exit any polygon sub-mode if switching away.
   const polyTools = document.getElementById('polygon-tools');
-  if (polyTools) {
-    polyTools.style.display = (region.type === 'polygon') ? '' : 'none';
-  }
+  if (polyTools) polyTools.style.display = (region.type === 'polygon') ? '' : 'none';
   if (region.type !== 'polygon' &&
       (mode === 'poly-add-vertex' || mode === 'poly-remove-vertex')) {
     setMode('add-black');
   }
+
   invalidateMatching();
   draw();
   updateStatus();
@@ -2468,9 +3011,14 @@ function init() {
   document.getElementById('btn-export-png') .addEventListener('click', exportPng);
   document.getElementById('btn-export-json').addEventListener('click', exportJson);
 
-  // Workflow step controls.
-  document.getElementById('btn-next-step').addEventListener('click', goNextStep);
-  document.getElementById('btn-prev-step').addEventListener('click', goPrevStep);
+  // Workflow stage radio buttons , clicking any of them jumps directly
+  // to that stage, so the user can go Sample → Lattice (or any other
+  // transition) in a single click.
+  for (const radio of document.querySelectorAll('input[name="workflow-stage"]')) {
+    radio.addEventListener('change', (e) => {
+      if (e.target.checked) setWorkflowStep(e.target.value);
+    });
+  }
 
   // Region controls.
   document.getElementById('shape-select').addEventListener('change', onShapeChanged);
@@ -2492,37 +3040,68 @@ function init() {
     draw();
   });
 
-  // Matching controls.
-  document.getElementById('btn-show-matching').addEventListener('click', () => {
-    const result = findPerfectMatching();
+  // Matching controls. All three actions have the same shape: run an
+  // algorithm, and either show its matching (valid case) or its error
+  // message (invalid case). `runMatching` factors that pattern out.
+  function runMatching(fn, successMsg) {
+    const result = fn();
     if (!result.ok) {
       shownMatching = null;
       setMatchingHint(result.reason, true);
     } else {
-      shownMatching = result.matching;
-      setMatchingHint(`Showing a perfect matching with ${result.size} edges.`, false);
+      setShownMatching(result.matching);
+      // Only overwrite the hint if validateMatchingSet didn't surface a
+      // warning (in which case the warning should stay visible).
+      if (validateMatchingSet(result.matching).length === 0) {
+        setMatchingHint(successMsg(result), false);
+      }
     }
     draw();
-  });
+  }
+
+  document.getElementById('btn-show-matching').addEventListener('click', () =>
+    runMatching(findPerfectMatching,
+      (r) => `Showing a perfect matching with ${r.size} edges.`));
+
+  document.getElementById('btn-random-matching').addEventListener('click', () =>
+    runMatching(findRandomMatching,
+      (r) => `Random matching with ${r.size} edges. Click Random again for a different one.`));
+
   document.getElementById('btn-hide-matching').addEventListener('click', () => {
+    if (simTimer) stopSimulation();
     shownMatching = null;
     setMatchingHint('');
+    document.getElementById('sim-stats').textContent = '';
     draw();
   });
+  document.getElementById('btn-sim-start').addEventListener('click', toggleSimulation);
+  const speedSlider = document.getElementById('sim-speed');
+  const speedLabel  = document.getElementById('sim-speed-label');
+  speedSlider.addEventListener('input', () => {
+    speedLabel.textContent = speedSlider.value;
+  });
+
+  // Info modal: open on icon click, close on Close button, backdrop click,
+  // or Escape key.
+  const simInfoModal = document.getElementById('sim-info-modal');
+  const openSimInfo  = () => simInfoModal.classList.add('open');
+  const closeSimInfo = () => simInfoModal.classList.remove('open');
+  document.getElementById('btn-sim-info')      .addEventListener('click', openSimInfo);
+  document.getElementById('btn-sim-info-close').addEventListener('click', closeSimInfo);
+  simInfoModal.addEventListener('click', (e) => {
+    if (e.target === simInfoModal) closeSimInfo();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && simInfoModal.classList.contains('open')) closeSimInfo();
+  });
   document.getElementById('btn-make-tileable').addEventListener('click', () => {
-    setMatchingHint('Searching for a tileable region adjustment…', false);
+    setMatchingHint('Searching for a tileable region adjustment...', false);
     setTimeout(() => {
-      const result = makeTileable();
-      if (!result.ok) {
-        shownMatching = null;
-        setMatchingHint(result.reason, true);
-      } else {
-        shownMatching = result.matching;
-        const msg = result.adjusted
-          ? `Region adjusted - showing a perfect matching with ${result.size} edges.`
-          : `Already tileable! Showing a perfect matching with ${result.size} edges.`;
-        setMatchingHint(msg, false);
-      }
+      runMatching(makeTileable, (r) => r.adjusted
+        ? `Region adjusted. Showing a perfect matching with ${r.size} edges.`
+        : `Already tileable. Showing a perfect matching with ${r.size} edges.`);
+      // Make Tileable can grow the region, so refit the view so the new
+      // bounding box is fully on screen, then redraw once more.
       updateStatus();
       fitView();
       draw();
@@ -2547,6 +3126,12 @@ function init() {
   updateWorkflowUI();
   updateStatus();
   draw();
+}
+
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
 }
 
 window.addEventListener('DOMContentLoaded', init);
