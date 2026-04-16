@@ -423,7 +423,7 @@
           <button id="btn-hide-matching">Hide</button>
         </div>
         <div class="row single">
-          <button id="btn-make-tileable" title="Adjust the region slightly to make it tileable">Make Tileable</button>
+          <button id="btn-make-tileable" title="Add boundary vertices to make the region tileable">Make Tileable</button>
         </div>
         <div id="matching-hint"></div>
       </div>
@@ -436,11 +436,11 @@
                   aria-label="How the simulation works"
                   title="How the simulation works">i</button>
         </div>
-        <p class="hint">Shuffles the current matching by random 4-cycle flips.</p>
+        <p class="hint">Shuffles the current matching by random face flips.</p>
         <div class="row single">
           <button id="btn-sim-start" title="Start or stop the simulation">Start</button>
         </div>
-        <label for="sim-speed">Speed <span id="sim-speed-label">50</span></label>
+        <label for="sim-speed">Steps/frame <span id="sim-speed-label">2</span></label>
         <input id="sim-speed" type="range" min="1" max="1000" value="50">
         <div id="sim-stats" class="hint" style="margin-top:4px;"></div>
       </div>
@@ -484,23 +484,28 @@
     </p>
     <p>
       There are usually many valid matchings. The simulation picks one and
-      then slowly shuffles it to explore the others. Each small shuffle is
-      called a <b>flip</b>.
+      then shuffles it to explore the others via <b>Glauber dynamics</b>
+      with face flips.
     </p>
-    <p><b>What a flip does:</b></p>
+    <p><b>What a face flip does:</b></p>
     <ol>
-      <li>Pick two matched pairs at random, say <i>A - B</i> and <i>C - D</i>.</li>
-      <li>Check if the graph also contains the edges <i>A - D</i> and <i>C - B</i>.</li>
-      <li>If yes, swap them: keep <i>A - D</i> and <i>C - B</i>, drop <i>A - B</i> and <i>C - D</i>.</li>
+      <li>The planar graph has <b>faces</b> &mdash; the enclosed regions
+          bounded by edges. Each face is a cycle of alternating black and
+          white vertices.</li>
+      <li>Pick a random face. Check whether its edges alternate between
+          matched and unmatched around the cycle.</li>
+      <li>If they do, <b>flip</b> the face: swap matched &harr; unmatched
+          for every edge of that face. The result is still a valid perfect
+          matching.</li>
     </ol>
     <p>
-      The result is still a valid matching, just a slightly different one.
-      Repeating this many thousands of times produces a fresh random
-      matching from the space of all valid ones.
+      Face flips of all sizes make the Markov chain <b>irreducible</b>:
+      any perfect matching can be reached from any other, so the dynamics
+      converge to the uniform distribution over all matchings.
     </p>
     <p>
-      <b>Speed</b> controls how many flips are attempted per animation
-      frame. Higher values mix faster but update less smoothly.
+      <b>Steps/frame</b> controls how many flips are attempted per
+      animation frame (exponential scale). Higher values mix faster.
     </p>
     <button class="modal-close" id="btn-sim-info-close" type="button">Close</button>
   </div>
@@ -663,6 +668,11 @@ let connectSelection = null;  // null | { dotId, i, j }
 // edge instance in the periodic lattice. The renderer highlights those
 // instances and fades the rest. Set to null when not showing a matching.
 let shownMatching = null;     // null | Set<string>
+
+// Vertices force-included by "Make Tileable" even though they fall outside the
+// region shape. Each entry is a vertex key 'dotId_i_j'. Cleared when the
+// matching is hidden or the region/lattice changes.
+let forcedVertices = new Set();
 
 // Simulation state for Glauber-style dynamics on the current matching.
 // See startSimulation() / simStep() for the algorithm. simState holds a
@@ -1189,24 +1199,27 @@ function edgeInstanceKey(aId, bId, dx, dy, i, j) {
  */
 function getRegionCellWindow() {
   const bb = regionBoundingBox();
+  // Extra padding when forced vertices exist (they may be 1 cell outside).
+  const pad = forcedVertices.size > 0 ? 2 : 1;
   return {
-    minI: Math.floor(bb.x0 / CELL_SIZE) - 1,
-    maxI: Math.floor(bb.x1 / CELL_SIZE) + 1,
-    minJ: Math.floor(bb.y0 / CELL_SIZE) - 1,
-    maxJ: Math.floor(bb.y1 / CELL_SIZE) + 1
+    minI: Math.floor(bb.x0 / CELL_SIZE) - pad,
+    maxI: Math.floor(bb.x1 / CELL_SIZE) + pad,
+    minJ: Math.floor(bb.y0 / CELL_SIZE) - pad,
+    maxJ: Math.floor(bb.y1 / CELL_SIZE) + pad
   };
 }
 
-/** Enumerate dot instances inside the region, keyed for graph algorithms. */
+/** Enumerate dot instances inside the region (+ forced vertices), keyed for graph algorithms. */
 function enumerateRegionVertices() {
   const win = getRegionCellWindow();
   const vertices = new Map();  // key 'dotId_i_j' → { d, i, j, color }
   for (let i = win.minI; i <= win.maxI; i++) {
     for (let j = win.minJ; j <= win.maxJ; j++) {
       for (const d of dots) {
-        if (isPointInRegion(d.x + i * CELL_SIZE, d.y + j * CELL_SIZE)) {
-          vertices.set(d.id + '_' + i + '_' + j,
-                       { d, i, j, color: d.color });
+        const key = d.id + '_' + i + '_' + j;
+        if (isPointInRegion(d.x + i * CELL_SIZE, d.y + j * CELL_SIZE) ||
+            forcedVertices.has(key)) {
+          vertices.set(key, { d, i, j, color: d.color });
         }
       }
     }
@@ -1381,33 +1394,32 @@ function findRandomMatching() {
 }
 
 // ============================================================================
-// GLAUBER DYNAMICS SIMULATION
+// GLAUBER DYNAMICS SIMULATION — FACE FLIPS
 //
 // Live MCMC-style shuffling of the current perfect matching. Each step is
-// a single attempted "alternating 4-cycle flip":
+// a single attempted "face flip":
 //
-//   Pick two random matched edges (B1 W1) and (B2 W2). If the "opposite"
-//   pairs (B1 W2) and (B2 W1) are both valid edges in the induced graph,
-//   then B1 B2 W1 W2 form a 4-cycle that alternates between matched and
-//   unmatched edges around the cycle. Flipping the cycle means removing
-//   (B1 W1, B2 W2) and adding (B1 W2, B2 W1) , still a valid perfect
-//   matching. We accept the flip with probability 1/2, which is the
-//   detailed-balance rule for uniform distribution on matchings.
+//   1. Build a rotation system (CCW-sorted adjacency at each vertex using
+//      the known world coordinates) and enumerate all faces of the planar
+//      embedding by walking half-edges.
 //
-// IMPORTANT: 4-cycle flips alone do NOT make the chain irreducible in
-// general , some matchings can't be reached from others by only 4-swaps.
-// A full sampler for arbitrary bipartite planar graphs needs face
-// enumeration (via rotation system / half-edge traversal) and face flips
-// of all sizes. That's the "final dream" sampler Petrov described, and
-// is the next bigger research step. This 4-cycle version is fast, easy
-// to read, and already produces visually interesting shuffling on most
-// lattices.
+//   2. Each Glauber step: pick a random face. If its edges alternate
+//      matched / unmatched around the cycle, flip the face (swap which
+//      edges are matched and which are not). Accept with probability 1
+//      (heat-bath for uniform measure: both local states have equal weight).
+//
+// Face flips make the chain irreducible on any 2-connected bipartite
+// planar graph: the symmetric difference of any two perfect matchings
+// decomposes into face-boundary cycles, and each such cycle is a single
+// face flip. This is the correct Glauber dynamics for sampling uniformly
+// on planar bipartite dimer covers.
 // ============================================================================
 
 /**
  * Build a fast-access simulation graph: induced adjacency + current
- * matching as two Maps (blackKey -> whiteKey and vice versa). Fails
- * with {ok:false,reason} if there's no initial perfect matching.
+ * matching as two Maps (blackKey -> whiteKey and vice versa), plus
+ * the face list derived from the planar rotation system.
+ * Fails with {ok:false,reason} if there's no initial perfect matching.
  */
 function buildSimState() {
   const vertices = enumerateRegionVertices();
@@ -1421,12 +1433,12 @@ function buildSimState() {
       `Region has ${nB} black and ${nW} white dots: unbalanced, so no perfect matching is possible.` };
   }
 
-  // adj: blackKey -> Map<whiteKey, instanceKey> , O(1) edge lookup.
+  // adj: blackKey -> Map<whiteKey, instanceKey> — O(1) edge lookup.
   const adj = new Map();
   for (const [key, v] of vertices) {
     if (v.color === 'B') adj.set(key, new Map());
   }
-  const win = getVisibleCellWindow();
+  const win = getRegionCellWindow();
   for (let i = win.minI; i <= win.maxI; i++) {
     for (let j = win.minJ; j <= win.maxJ; j++) {
       for (const e of edges) {
@@ -1441,24 +1453,81 @@ function buildSimState() {
     }
   }
 
+  // ------------------------------------------------------------------
+  // Build rotation system and enumerate faces.
+  // ------------------------------------------------------------------
+
+  // World positions for every vertex.
+  const pos = new Map();
+  for (const [key, v] of vertices) {
+    pos.set(key, { x: v.d.x + v.i * CELL_SIZE, y: v.d.y + v.j * CELL_SIZE });
+  }
+
+  // Full symmetric adjacency: vertexKey -> [neighborKey, ...] sorted CCW.
+  const fullAdj = new Map();
+  for (const [key] of vertices) fullAdj.set(key, []);
+  for (const [blackKey, neighbors] of adj) {
+    for (const [whiteKey] of neighbors) {
+      fullAdj.get(blackKey).push(whiteKey);
+      if (fullAdj.has(whiteKey)) fullAdj.get(whiteKey).push(blackKey);
+    }
+  }
+  for (const [key, nbrs] of fullAdj) {
+    const p = pos.get(key);
+    nbrs.sort((a, b) => {
+      const pa = pos.get(a), pb = pos.get(b);
+      return Math.atan2(pa.y - p.y, pa.x - p.x) -
+             Math.atan2(pb.y - p.y, pb.x - p.x);
+    });
+  }
+
+  // For fast "next in rotation" lookup: for each vertex, a Map from
+  // neighbor key to its index in the sorted adjacency list.
+  const rotIdx = new Map();
+  for (const [key, nbrs] of fullAdj) {
+    const m = new Map();
+    for (let k = 0; k < nbrs.length; k++) m.set(nbrs[k], k);
+    rotIdx.set(key, m);
+  }
+
+  // Enumerate faces by tracing half-edges. For directed half-edge u→v,
+  // the next half-edge on the same face is: at v, find u in the CCW
+  // rotation, advance one step CCW to get w; next half-edge is v→w.
+  const visitedHE = new Set();
+  const faces = [];
+  for (const [u, nbrs] of fullAdj) {
+    for (const v of nbrs) {
+      if (visitedHE.has(u + '>' + v)) continue;
+      const face = [];          // array of [from, to] vertex-key pairs
+      let cu = u, cv = v;
+      do {
+        face.push([cu, cv]);
+        visitedHE.add(cu + '>' + cv);
+        const rot = fullAdj.get(cv);
+        const idx = rotIdx.get(cv).get(cu);
+        const nextIdx = (idx + 1) % rot.length;
+        cu = cv;
+        cv = rot[nextIdx];
+      } while (cu !== u || cv !== v);
+      faces.push(face);
+    }
+  }
+
+  // ------------------------------------------------------------------
   // Seed the matching: reuse the currently-shown matching if possible,
   // otherwise compute a fresh one.
+  // ------------------------------------------------------------------
   const blackMatch = new Map();
   const whiteMatch = new Map();
   const blackKeys  = Array.from(adj.keys());
 
-  // Try to seed from the currently-displayed matching. We only accept
-  // the seed if it is a proper 1:1 matching , every black has a unique
-  // white partner. If ANY white is claimed by two blacks (which would
-  // violate the matching invariant), we throw the seed away and fall
-  // back to a fresh run of findPerfectMatching.
   const seedFromShown = () => {
     blackMatch.clear();
     whiteMatch.clear();
     for (const blackKey of blackKeys) {
       for (const [whiteKey, instKey] of adj.get(blackKey)) {
         if (shownMatching && shownMatching.has(instKey)) {
-          if (whiteMatch.has(whiteKey)) continue;  // already taken: skip
+          if (whiteMatch.has(whiteKey)) continue;
           blackMatch.set(blackKey, whiteKey);
           whiteMatch.set(whiteKey, blackKey);
           break;
@@ -1471,7 +1540,6 @@ function buildSimState() {
 
   let seeded = shownMatching ? seedFromShown() : false;
   if (!seeded) {
-    // Fall back to a fresh matching via augmenting paths.
     const fresh = findPerfectMatching();
     if (!fresh.ok) return fresh;
     blackMatch.clear();
@@ -1488,36 +1556,55 @@ function buildSimState() {
     }
   }
 
-  return { ok: true, adj, blackMatch, whiteMatch, blackKeys, size: blackKeys.length };
+  return { ok: true, adj, blackMatch, whiteMatch, blackKeys,
+           faces, vertices, size: blackKeys.length };
 }
 
-/** Attempt one alternating-4-cycle flip. Returns true iff a flip happened. */
+/**
+ * Attempt one face flip. Pick a random face, check if its edges alternate
+ * matched / unmatched; if so, swap them. Returns true iff a flip happened.
+ */
 function simTryFlip(state) {
-  const { adj, blackMatch, whiteMatch, blackKeys } = state;
-  if (blackKeys.length < 2) return false;
+  const { blackMatch, whiteMatch, faces, vertices } = state;
+  if (faces.length === 0) return false;
 
-  // Pick two distinct random matched edges via their black endpoints.
-  const b1 = blackKeys[(Math.random() * blackKeys.length) | 0];
-  const b2 = blackKeys[(Math.random() * blackKeys.length) | 0];
-  if (b1 === b2) return false;
+  const face = faces[(Math.random() * faces.length) | 0];
+  const n = face.length;
 
-  const w1 = blackMatch.get(b1);
-  const w2 = blackMatch.get(b2);
-  if (!w1 || !w2) return false;
-  if (w1 === w2) return false;          // degenerate: would break 1:1
+  // Pre-compute matched status for every edge BEFORE touching the maps.
+  // (Consecutive face edges share a vertex, so modifying blackMatch
+  // mid-loop would corrupt the check for the next edge.)
+  const matched = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const [u, v] = face[i];
+    const uColor = vertices.get(u).color;
+    matched[i] = uColor === 'B'
+      ? blackMatch.get(u) === v
+      : blackMatch.get(v) === u;
+  }
 
-  // Check that the "swapped" edges both exist in the induced graph.
-  const nb1 = adj.get(b1);
-  const nb2 = adj.get(b2);
-  if (!nb1.has(w2) || !nb2.has(w1)) return false;
+  // Check alternation.
+  for (let i = 1; i < n; i++) {
+    if (matched[i] === matched[i - 1]) return false;
+  }
+  if (matched[0] === matched[n - 1]) return false;
 
-  // Heat-bath: flip with probability 1/2 for uniform distribution.
-  if (Math.random() < 0.5) return false;
-
-  blackMatch.set(b1, w2);
-  blackMatch.set(b2, w1);
-  whiteMatch.set(w1, b2);
-  whiteMatch.set(w2, b1);
+  // Face is flippable — execute the flip. Each previously-unmatched
+  // edge becomes matched; the previously-matched edges lose their
+  // status automatically when their endpoints get reassigned.
+  for (let i = 0; i < n; i++) {
+    if (!matched[i]) {
+      const [u, v] = face[i];
+      const uColor = vertices.get(u).color;
+      if (uColor === 'B') {
+        blackMatch.set(u, v);
+        whiteMatch.set(v, u);
+      } else {
+        blackMatch.set(v, u);
+        whiteMatch.set(u, v);
+      }
+    }
+  }
   return true;
 }
 
@@ -1592,6 +1679,56 @@ function startSimulation() {
   simSteps = 0;
   simAccepted = 0;
 
+  // --- one-time diagnostic ---
+  {
+    const fl = simState.faces.map(f => f.length);
+    const odd = fl.filter(l => l % 2 !== 0).length;
+    let totalEdges = 0;
+    for (const [, nbrs] of simState.adj) totalEdges += nbrs.size;
+    console.log('[sim] V=' + simState.vertices.size +
+                ' E=' + totalEdges +
+                ' faces=' + fl.length +
+                ' sizes=' + fl.sort((a,b)=>a-b).join(',') +
+                ' odd=' + odd);
+    // Check how many faces are flippable right now.
+    let flippable = 0;
+    for (const face of simState.faces) {
+      let ok = true;
+      let prev;
+      for (let i = 0; i < face.length; i++) {
+        const [u, v] = face[i];
+        const uc = simState.vertices.get(u).color;
+        const m = uc === 'B'
+          ? simState.blackMatch.get(u) === v
+          : simState.blackMatch.get(v) === u;
+        if (i > 0 && m === prev) { ok = false; break; }
+        prev = m;
+      }
+      if (ok) {
+        const [u0, v0] = face[0];
+        const uc0 = simState.vertices.get(u0).color;
+        const fm = uc0 === 'B'
+          ? simState.blackMatch.get(u0) === v0
+          : simState.blackMatch.get(v0) === u0;
+        if (fm === prev) ok = false;
+      }
+      if (ok) flippable++;
+    }
+    console.log('[sim] flippable faces right now: ' + flippable + '/' + fl.length);
+    // Log the first few faces with their matching pattern.
+    for (let fi = 0; fi < Math.min(5, simState.faces.length); fi++) {
+      const face = simState.faces[fi];
+      const pat = face.map(([u, v]) => {
+        const uc = simState.vertices.get(u).color;
+        const m = uc === 'B'
+          ? simState.blackMatch.get(u) === v
+          : simState.blackMatch.get(v) === u;
+        return (m ? 'M' : '.');
+      }).join('');
+      console.log('  face[' + fi + '] len=' + face.length + ' pat=' + pat);
+    }
+  }
+
   // Toggle the button to look "active" like lozenge's Start/Stop.
   const btn = document.getElementById('btn-sim-start');
   btn.textContent = 'Stop';
@@ -1599,18 +1736,18 @@ function startSimulation() {
 
   const loop = () => {
     if (!simTimer) return;                    // stopped while pending
-    const stepsPerFrame =
+    const sliderVal =
       parseInt(document.getElementById('sim-speed').value, 10) || 50;
+    // Exponential: slider 1 → 1 step, slider 1000 → 100 000 steps.
+    const stepsPerFrame = Math.max(1, Math.round(
+      Math.pow(10, 5 * (sliderVal - 1) / 999)));
     for (let k = 0; k < stepsPerFrame; k++) {
       if (simTryFlip(simState)) simAccepted++;
       simSteps++;
     }
     // Rebuild shownMatching directly from the simState maps (which are
-    // guaranteed valid by construction: simTryFlip only ever swaps two
-    // entries at a time, maintaining the 1:1 match invariant). We skip
-    // the full validateMatchingSet call here because it runs every frame
-    // and would be wasted work , the defensive per-dot guard in
-    // drawAllEdges is enough insurance during live simulation.
+    // valid by construction: face flips swap matched ↔ unmatched around
+    // a single face, preserving the 1:1 match invariant).
     shownMatching = simMatchingToShown(simState);
     updateSimStats();
     draw();
@@ -1643,43 +1780,125 @@ function toggleSimulation() {
 function updateSimStats() {
   const el = document.getElementById('sim-stats');
   if (!el) return;
-  el.textContent = `Steps: ${simSteps.toLocaleString()} | Flips: ${simAccepted.toLocaleString()}`;
+  const nFaces = simState ? simState.faces.length : 0;
+  el.textContent = `Steps: ${simSteps.toLocaleString()} | Flips: ${simAccepted.toLocaleString()} | Faces: ${nFaces}`;
 }
 
 /**
- * Try to grow the region slightly so that a perfect matching exists.
- * Only expands. never shrinks or removes dots. Scales the region
- * uniformly from its center in small increments until the induced
- * subgraph has a perfect matching.
+ * Make the region tileable by adding specific outside vertices.
+ *
+ * Algorithm (like the lozenge editor's repair):
+ *   1. Run matching on the current induced subgraph.
+ *   2. For each unmatched vertex, find an adjacent opposite-color vertex
+ *      just outside the region and force-include it.
+ *   3. Re-run matching with the expanded vertex set.
+ *   4. Repeat until a perfect matching is found or no progress.
+ *
+ * The added vertices are stored in `forcedVertices` and rendered at full
+ * opacity alongside the region dots.
  *
  * Returns { ok, matching, size, reason, adjusted }.
  */
 function makeTileable() {
-  // Already tileable?
+  forcedVertices.clear();
+
   const initial = findPerfectMatching();
   if (initial.ok) return { ...initial, adjusted: false };
 
-  const original = cloneRegionGeom();
-  const bb = regionBoundingBox();
-  const cx = (bb.x0 + bb.x1) / 2;
-  const cy = (bb.y0 + bb.y1) / 2;
+  for (let pass = 0; pass < 30; pass++) {
+    const vertices = enumerateRegionVertices();
+    const adj = buildInducedAdjacency(vertices);
 
-  // Grow the region in 0.5% steps up to +60%.
-  const maxSteps = 120;
-  const step = 0.005;
-  for (let k = 1; k <= maxSteps; k++) {
-    const factor = 1.0 + step * k;
-    applyRegionScale(original, cx, cy, factor);
-    const result = findPerfectMatching();
-    if (result.ok) {
-      invalidateMatching();
-      return { ...result, adjusted: true };
+    // Count and run matching.
+    let nB = 0, nW = 0;
+    for (const [, v] of vertices) {
+      if (v.color === 'B') nB++; else nW++;
     }
+    if (nB === 0 && nW === 0) break;
+
+    const matchBlack = new Map();
+    const matchWhite = new Map();
+
+    function augment(bk, visited) {
+      for (const link of adj.get(bk) || []) {
+        if (visited.has(link.whiteKey)) continue;
+        visited.add(link.whiteKey);
+        const ex = matchWhite.get(link.whiteKey);
+        if (!ex || augment(ex.blackKey, visited)) {
+          matchBlack.set(bk, link);
+          matchWhite.set(link.whiteKey, { blackKey: bk, instanceKey: link.instanceKey });
+          return true;
+        }
+      }
+      return false;
+    }
+
+    let matched = 0;
+    for (const bk of adj.keys()) {
+      if (augment(bk, new Set())) matched++;
+    }
+
+    if (matched === nB && nB === nW) {
+      // Perfect matching found. Stop any running simulation but keep
+      // forcedVertices (invalidateMatching would clear them).
+      if (simTimer) {
+        cancelAnimationFrame(simTimer);
+        simTimer = null;
+        const btn = document.getElementById('btn-sim-start');
+        if (btn) { btn.textContent = 'Start'; btn.classList.remove('active'); }
+      }
+      simState = null;
+      const instances = new Set();
+      for (const [, link] of matchBlack) instances.add(link.instanceKey);
+      return { ok: true, matching: instances, size: matched, adjusted: true };
+    }
+
+    // For each unmatched vertex, add an outside neighbor of opposite color.
+    let added = 0;
+
+    // Unmatched BLACK → add an outside WHITE neighbor.
+    for (const [bk,] of adj) {
+      if (matchBlack.has(bk)) continue;
+      const parts = bk.split('_');
+      const dotId = parseInt(parts[0]);
+      const ci = parseInt(parts[1]);
+      const cj = parseInt(parts[2]);
+      for (const e of edges) {
+        if (e.aId !== dotId) continue;
+        const wk = e.bId + '_' + (ci + e.dx) + '_' + (cj + e.dy);
+        if (!vertices.has(wk)) {
+          forcedVertices.add(wk);
+          added++;
+          break;
+        }
+      }
+    }
+
+    // Unmatched WHITE → add an outside BLACK neighbor.
+    for (const [wk, v] of vertices) {
+      if (v.color !== 'W') continue;
+      if (matchWhite.has(wk)) continue;
+      const parts = wk.split('_');
+      const dotId = parseInt(parts[0]);
+      const ci = parseInt(parts[1]);
+      const cj = parseInt(parts[2]);
+      for (const e of edges) {
+        if (e.bId !== dotId) continue;
+        const bk = e.aId + '_' + (ci - e.dx) + '_' + (cj - e.dy);
+        if (!vertices.has(bk)) {
+          forcedVertices.add(bk);
+          added++;
+          break;
+        }
+      }
+    }
+
+    if (added === 0) break;
   }
 
-  // No luck , restore the original region.
-  restoreRegionGeom(original);
-  return { ok: false, reason: 'Could not find a tileable region by expanding. Try repositioning the region manually.', adjusted: false };
+  // Failed — clean up.
+  forcedVertices.clear();
+  return { ok: false, reason: 'Could not make tileable by adding boundary vertices.', adjusted: false };
 }
 
 /** Scale the region shape uniformly around a center point. */
@@ -1902,7 +2121,7 @@ function drawAllEdges(win) {
     ctx.save();
     ctx.setLineDash([5, 5]);
     ctx.strokeStyle = 'rgba(150, 130, 90, 0.22)';
-    ctx.lineWidth   = 1;
+    ctx.lineWidth   = 2.5;
     for (let i = win.minI; i <= win.maxI; i++) {
       for (let j = win.minJ; j <= win.maxJ; j++) {
         for (const e of edges) {
@@ -1983,8 +2202,9 @@ function drawAllEdges(win) {
         // In the Lattice stage, ignore the region entirely , every dot and
         // edge in the periodic tiling is drawn at full visibility so the
         // user isn't distracted by a region overlay while building the cell.
-        const inRegion = workflowStep === 'lattice' ||
-          (isPointInRegion(aWx, aWy) && isPointInRegion(bWx, bWy));
+        const aIn = isPointInRegion(aWx, aWy) || forcedVertices.has(e.aId + '_' + i + '_' + j);
+        const bIn = isPointInRegion(bWx, bWy) || forcedVertices.has(e.bId + '_' + ni + '_' + nj);
+        const inRegion = workflowStep === 'lattice' || (aIn && bIn);
         ctx.strokeStyle = inRegion ? '#E57200' : '#f2c999';
         ctx.lineWidth   = inRegion ? 2.4       : 1.3;
         const sp = worldToScreen({ x: aWx, y: aWy });
@@ -2019,7 +2239,8 @@ function drawAllDots(win) {
         const wy = d.y + oy;
         // Same rule as drawAllEdges: in Lattice stage we don't apply the
         // region-based opacity, so the user sees the clean lattice.
-        const inRegion = workflowStep === 'lattice' || isPointInRegion(wx, wy);
+        const inRegion = workflowStep === 'lattice' || isPointInRegion(wx, wy) ||
+          forcedVertices.has(d.id + '_' + i + '_' + j);
         const sp = worldToScreen({ x: wx, y: wy });
 
         // Highlight halo for the Edit-Edges selection across every copy.
@@ -2257,6 +2478,7 @@ function invalidateMatching() {
   const statsEl = document.getElementById('sim-stats');
   if (statsEl) statsEl.textContent = '';
 
+  forcedVertices.clear();
   if (shownMatching) {
     shownMatching = null;
     setMatchingHint('Matching cleared (the graph or region changed).', false);
@@ -2316,7 +2538,8 @@ function countDotsInRegionByColor() {
       const ox = i * CELL_SIZE;
       const oy = j * CELL_SIZE;
       for (const d of dots) {
-        if (isPointInRegion(d.x + ox, d.y + oy)) {
+        if (isPointInRegion(d.x + ox, d.y + oy) ||
+            forcedVertices.has(d.id + '_' + i + '_' + j)) {
           if (d.color === 'B') black++; else white++;
         }
       }
@@ -2336,11 +2559,11 @@ function countEdgesInRegion() {
         if (!isCellInWindow(ni, nj, win)) continue;
         const a = dotById(e.aId);
         const b = dotById(e.bId);
-        const aWx = a.x + i * CELL_SIZE;
-        const aWy = a.y + j * CELL_SIZE;
-        const bWx = b.x + ni * CELL_SIZE;
-        const bWy = b.y + nj * CELL_SIZE;
-        if (isPointInRegion(aWx, aWy) && isPointInRegion(bWx, bWy)) n++;
+        const aIn = isPointInRegion(a.x + i * CELL_SIZE, a.y + j * CELL_SIZE) ||
+                    forcedVertices.has(e.aId + '_' + i + '_' + j);
+        const bIn = isPointInRegion(b.x + ni * CELL_SIZE, b.y + nj * CELL_SIZE) ||
+                    forcedVertices.has(e.bId + '_' + ni + '_' + nj);
+        if (aIn && bIn) n++;
       }
     }
   }
@@ -3070,6 +3293,7 @@ function init() {
   document.getElementById('btn-hide-matching').addEventListener('click', () => {
     if (simTimer) stopSimulation();
     shownMatching = null;
+    forcedVertices.clear();
     setMatchingHint('');
     document.getElementById('sim-stats').textContent = '';
     draw();
@@ -3077,9 +3301,13 @@ function init() {
   document.getElementById('btn-sim-start').addEventListener('click', toggleSimulation);
   const speedSlider = document.getElementById('sim-speed');
   const speedLabel  = document.getElementById('sim-speed-label');
-  speedSlider.addEventListener('input', () => {
-    speedLabel.textContent = speedSlider.value;
-  });
+  function updateSpeedLabel() {
+    const v = parseInt(speedSlider.value, 10) || 50;
+    const steps = Math.max(1, Math.round(Math.pow(10, 5 * (v - 1) / 999)));
+    speedLabel.textContent = steps.toLocaleString();
+  }
+  speedSlider.addEventListener('input', updateSpeedLabel);
+  updateSpeedLabel();
 
   // Info modal: open on icon click, close on Close button, backdrop click,
   // or Escape key.
@@ -3095,15 +3323,12 @@ function init() {
     if (e.key === 'Escape' && simInfoModal.classList.contains('open')) closeSimInfo();
   });
   document.getElementById('btn-make-tileable').addEventListener('click', () => {
-    setMatchingHint('Searching for a tileable region adjustment...', false);
+    setMatchingHint('Adding boundary vertices...', false);
     setTimeout(() => {
       runMatching(makeTileable, (r) => r.adjusted
-        ? `Region adjusted. Showing a perfect matching with ${r.size} edges.`
+        ? `Added ${forcedVertices.size} vertices. Showing a perfect matching with ${r.size} edges.`
         : `Already tileable. Showing a perfect matching with ${r.size} edges.`);
-      // Make Tileable can grow the region, so refit the view so the new
-      // bounding box is fully on screen, then redraw once more.
       updateStatus();
-      fitView();
       draw();
     }, 30);
   });
