@@ -9,6 +9,16 @@
        SECTION 1: CSS STYLES
        ======================================================================== */
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    kbd {
+      font-family: ui-monospace, Menlo, monospace;
+      font-size: 0.75em;
+      padding: 1px 5px;
+      border: 1px solid #bbb;
+      border-bottom-width: 2px;
+      border-radius: 3px;
+      background: #f4f4f4;
+      color: #333;
+    }
     body {
       font-family: Georgia, 'Times New Roman', serif;
       background: #fafafa;
@@ -328,12 +338,12 @@
 <div id="app">
   <header>
     <h1>Lattice Creator</h1>
-    <span id="status-badge">Empty</span>
+    <span id="status-badge" role="status" aria-live="polite" aria-label="Graph balance status">Empty</span>
     <span style="flex:1"></span>
     <a href="index.html" style="font-size:0.85rem; color:#1a5276;">Back</a>
   </header>
   <div id="main-layout">
-    <canvas id="canvas"></canvas>
+    <canvas id="canvas" role="img" aria-label="Lattice canvas: shows the periodic bipartite graph and current matching. Use the controls panel to add dots, define a region, and run the simulation."></canvas>
     <div id="controls">
 
       <!-- Workflow steps -->
@@ -360,11 +370,11 @@
       <div class="panel" data-panel="dots">
         <h3>Dots</h3>
         <p class="hint">Click in the bold cell to place dots. Use <b>Move</b> to drag a dot (any visible copy).</p>
-        <div class="row four">
-          <button id="btn-add-black" class="active">+ Black</button>
-          <button id="btn-add-white">+ White</button>
-          <button id="btn-move">Move</button>
-          <button id="btn-erase">Erase</button>
+        <div class="row four" role="group" aria-label="Dot placement tools">
+          <button id="btn-add-black" class="active" aria-pressed="true">+ Black</button>
+          <button id="btn-add-white" aria-pressed="false">+ White</button>
+          <button id="btn-move" aria-pressed="false">Move</button>
+          <button id="btn-erase" aria-pressed="false">Erase</button>
         </div>
         <div class="row single">
           <button id="btn-clear-dots" class="danger">Clear All Dots</button>
@@ -425,6 +435,20 @@
         <div class="row single">
           <button id="btn-make-tileable" title="Add boundary vertices to make the region tileable">Make Tileable</button>
         </div>
+        <div id="height-mode-row" class="row three" style="display:none; margin-top:6px;">
+          <label class="stage-radio" data-hmode="off">
+            <input type="radio" name="height-mode" value="off" checked>
+            <span>Matching</span>
+          </label>
+          <label class="stage-radio" data-hmode="2d">
+            <input type="radio" name="height-mode" value="2d">
+            <span>2D Height</span>
+          </label>
+          <label class="stage-radio" data-hmode="3d">
+            <input type="radio" name="height-mode" value="3d">
+            <span>3D Height</span>
+          </label>
+        </div>
         <div id="matching-hint"></div>
       </div>
 
@@ -466,7 +490,8 @@
       </div>
 
       <p class="hint" style="text-align:center; margin-top:4px;">
-        Scroll to zoom · Ctrl+drag to pan
+        Scroll to zoom · Ctrl+drag to pan<br>
+        <kbd>S</kbd> show · <kbd>R</kbd> random · <kbd>Space</kbd> start/stop
       </p>
 
     </div>
@@ -669,6 +694,11 @@ let connectSelection = null;  // null | { dotId, i, j }
 // instances and fades the rest. Set to null when not showing a matching.
 let shownMatching = null;     // null | Set<string>
 
+// Vertex keys ('id_i_j') of black dots that findPerfectMatching could not
+// pair, captured on the most recent failed run so the renderer can highlight
+// the offenders. Cleared on success or when the graph/region changes.
+let unmatchedVertexKeys = new Set();
+
 // Vertices force-included by "Make Tileable" even though they fall outside the
 // region shape. Each entry is a vertex key 'dotId_i_j'. Cleared when the
 // matching is hidden or the region/lattice changes.
@@ -682,6 +712,11 @@ let simState    = null;
 let simTimer    = null;
 let simSteps    = 0;
 let simAccepted = 0;
+let heightMode   = 'off';    // 'off' | '2d' | '3d'
+let heightValues = null;     // Map<faceIndex, int> or null
+let camTheta     = -0.52;    // 3D horizontal orbit angle (radians)
+let camPhi       = 0.55;     // 3D elevation tilt angle (radians)
+let camDrag      = null;     // { startX, startY, startTheta, startPhi } during 3D drag
 
 // Mouse drag tracking so we can tell clicks apart from pans.
 let isPanning   = false;
@@ -689,6 +724,11 @@ let panStart    = null;
 let downPoint   = null;
 let dragDistance = 0;
 
+// ----------------------------------------------------------------------------
+// Seeded PRNG (xorshift32). Deterministic so simulations are reproducible.
+// Read seed from ?seed=<int> query param, fall back to a Date.now()-based
+// value (logged to console so the user can replay it).
+// ----------------------------------------------------------------------------
 // ============================================================================
 // SECTION 2: GEOMETRY HELPERS
 //
@@ -1264,6 +1304,47 @@ function buildInducedAdjacency(vertices) {
  * Returns an object {ok, matching, reason}. `matching` is a Set of
  * instance keys for the chosen edges (only present when ok === true).
  */
+/**
+ * Pure bipartite maximum matching via Hungarian-style augmenting paths.
+ *
+ * adj: Map<blackKey, Iterable<edge>> — values can be either bare whiteKeys or
+ *      richer link objects; pass `getWhite` to extract the white id.
+ * getWhite: (edge) => whiteKey. Defaults to identity.
+ *
+ * Returns:
+ *   matchBlack: Map<blackKey, edge>           — full edge object kept
+ *   matchWhite: Map<whiteKey, blackKey>       — back-pointer
+ *   size:       integer
+ *
+ * Pure: no DOM, no globals.
+ */
+function bipartiteMaxMatching(adj, getWhite) {
+  const getW = getWhite || ((e) => e);
+  const matchBlack = new Map();
+  const matchWhite = new Map();
+
+  function augment(blackKey, visited) {
+    for (const edge of adj.get(blackKey) || []) {
+      const whiteKey = getW(edge);
+      if (visited.has(whiteKey)) continue;
+      visited.add(whiteKey);
+      const existingBlack = matchWhite.get(whiteKey);
+      if (existingBlack === undefined || augment(existingBlack, visited)) {
+        matchBlack.set(blackKey, edge);
+        matchWhite.set(whiteKey, blackKey);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  let size = 0;
+  for (const blackKey of adj.keys()) {
+    if (augment(blackKey, new Set())) size++;
+  }
+  return { matchBlack, matchWhite, size };
+}
+
 function findPerfectMatching() {
   const vertices = enumerateRegionVertices();
 
@@ -1281,31 +1362,27 @@ function findPerfectMatching() {
   }
 
   const adj = buildInducedAdjacency(vertices);
-  const matchBlack = new Map();  // blackKey -> { whiteKey, instanceKey }
-  const matchWhite = new Map();  // whiteKey -> { blackKey, instanceKey }
-
-  function augment(blackKey, visited) {
-    for (const link of adj.get(blackKey) || []) {
-      if (visited.has(link.whiteKey)) continue;
-      visited.add(link.whiteKey);
-      const existing = matchWhite.get(link.whiteKey);
-      if (!existing || augment(existing.blackKey, visited)) {
-        matchBlack.set(blackKey, link);
-        matchWhite.set(link.whiteKey, { blackKey, instanceKey: link.instanceKey });
-        return true;
-      }
-    }
-    return false;
-  }
-
-  let matched = 0;
-  for (const blackKey of adj.keys()) {
-    if (augment(blackKey, new Set())) matched++;
-  }
+  const { matchBlack, size: matched } = bipartiteMaxMatching(adj, (link) => link.whiteKey);
 
   if (matched !== nB) {
-    return { ok: false, reason:
-      `No perfect matching: only ${matched} of ${nB} blacks could be paired. The induced graph has no way to tile this region.` };
+    // Identify the offending blacks. Distinguish "isolated" (no incident
+    // edges at all — the obvious failure) from "blocked" (has neighbors but
+    // every alternating path from it is dead — Hall's condition fails).
+    const isolated = [], blocked = [];
+    for (const blackKey of adj.keys()) {
+      if (matchBlack.has(blackKey)) continue;
+      const links = adj.get(blackKey);
+      if (!links || links.length === 0) isolated.push(blackKey);
+      else blocked.push(blackKey);
+    }
+    let reason = `No perfect matching: only ${matched} of ${nB} blacks could be paired.`;
+    if (isolated.length > 0) {
+      reason += ` ${isolated.length} black dot${isolated.length === 1 ? ' has' : 's have'} no edges inside the region.`;
+    }
+    if (blocked.length > 0) {
+      reason += ` ${blocked.length} other black${blocked.length === 1 ? '' : 's'} compete for too few white neighbors (Hall's condition fails).`;
+    }
+    return { ok: false, reason, unmatched: new Set([...isolated, ...blocked]) };
   }
 
   const instances = new Set();
@@ -1361,27 +1438,10 @@ function findRandomMatching() {
   // starting orders give different matchings even on the same adjacency.
   const blackKeys = shuffleInPlace(Array.from(adj.keys()));
 
-  const matchBlack = new Map();
-  const matchWhite = new Map();
-
-  function augment(blackKey, visited) {
-    for (const link of adj.get(blackKey) || []) {
-      if (visited.has(link.whiteKey)) continue;
-      visited.add(link.whiteKey);
-      const existing = matchWhite.get(link.whiteKey);
-      if (!existing || augment(existing.blackKey, visited)) {
-        matchBlack.set(blackKey, link);
-        matchWhite.set(link.whiteKey, { blackKey, instanceKey: link.instanceKey });
-        return true;
-      }
-    }
-    return false;
-  }
-
-  let matched = 0;
-  for (const blackKey of blackKeys) {
-    if (augment(blackKey, new Set())) matched++;
-  }
+  // Reuse the pure helper, but with a custom black-iteration order.
+  const orderedAdj = new Map();
+  for (const k of blackKeys) orderedAdj.set(k, adj.get(k));
+  const { matchBlack, size: matched } = bipartiteMaxMatching(orderedAdj, (link) => link.whiteKey);
 
   if (matched !== nB) {
     return { ok: false, reason:
@@ -1605,6 +1665,7 @@ function simTryFlip(state) {
       }
     }
   }
+
   return true;
 }
 
@@ -1617,6 +1678,107 @@ function simMatchingToShown(state) {
   return out;
 }
 
+// ---- Height function ----
+//
+// The height function assigns an integer to every face of the planar graph.
+// For a perfect matching on a bipartite planar graph embedded in the plane:
+//
+//   Walk from face F1 to adjacent face F2 across their shared edge (u, v).
+//   Let u be the vertex on your LEFT as you cross.
+//
+//   - If u is BLACK and the edge is MATCHED:     height changes by +1
+//   - If u is BLACK and the edge is NOT MATCHED:  height changes by -1
+//   - If u is WHITE and the edge is MATCHED:      height changes by -1
+//   - If u is WHITE and the edge is NOT MATCHED:  height changes by +1
+//
+//   Equivalently: delta = (u is black ? +1 : -1) * (edge is matched ? +1 : -1)
+//
+// This is path-independent for a perfect matching on a simply-connected
+// region of a bipartite planar graph, so BFS across adjacent faces gives a
+// well-defined height for every face.
+
+/**
+ * Build a face-adjacency structure: for each face, which other faces share
+ * an edge with it, and what is the shared half-edge (u, v)?
+ *
+ * Returns faceAdj: array of arrays. faceAdj[i] = [{neighbor, u, v}, ...].
+ * The half-edge (u, v) belongs to face i (the directed edge u->v appears
+ * in face i's boundary), and the reverse (v, u) belongs to the neighbor.
+ */
+function buildFaceAdjacency(faces) {
+  // Map from half-edge "u>v" to the face index it belongs to.
+  const heToFace = new Map();
+  for (let fi = 0; fi < faces.length; fi++) {
+    for (const [u, v] of faces[fi]) {
+      heToFace.set(u + '>' + v, fi);
+    }
+  }
+
+  const faceAdj = faces.map(() => []);
+  for (let fi = 0; fi < faces.length; fi++) {
+    for (const [u, v] of faces[fi]) {
+      // The twin half-edge (v, u) belongs to the neighboring face.
+      const twin = v + '>' + u;
+      if (heToFace.has(twin)) {
+        const ni = heToFace.get(twin);
+        if (ni !== fi) {
+          faceAdj[fi].push({ neighbor: ni, u, v });
+        }
+      }
+    }
+  }
+  return faceAdj;
+}
+
+/**
+ * Compute the height function for all faces given the current matching.
+ *
+ * Returns a Map<faceIndex, int> with one entry per face. The reference
+ * face (index 0) gets height 0; all others are computed by BFS.
+ */
+function computeHeightFunction(state) {
+  const { faces, vertices, blackMatch } = state;
+  if (faces.length === 0) return new Map();
+
+  const faceAdj = buildFaceAdjacency(faces);
+
+  // Is the edge (u, v) in the matching?  u and v are vertex keys.
+  // Convention: edges go from black to white in the adjacency, so we check
+  // both orientations.
+  function isMatched(u, v) {
+    const uc = vertices.get(u);
+    const vc = vertices.get(v);
+    if (!uc || !vc) return false;
+    if (uc.color === 'B') return blackMatch.get(u) === v;
+    return blackMatch.get(v) === u;
+  }
+
+  const heights = new Map();
+  heights.set(0, 0);
+  const queue = [0];
+
+  for (let qi = 0; qi < queue.length; qi++) {
+    const fi = queue[qi];
+    const h  = heights.get(fi);
+
+    for (const { neighbor, u, v } of faceAdj[fi]) {
+      if (heights.has(neighbor)) continue;
+
+      // u is on the LEFT as we cross from face fi to face neighbor.
+      // (In the half-edge (u, v) belonging to face fi, u is the start.)
+      const uColor  = vertices.get(u);
+      const matched = isMatched(u, v);
+      const sign    = (uColor && uColor.color === 'B') ? 1 : -1;
+      const delta   = sign * (matched ? 1 : -1);
+
+      heights.set(neighbor, h + delta);
+      queue.push(neighbor);
+    }
+  }
+
+  return heights;
+}
+
 /**
  * Assign shownMatching, validate it, and surface any problems as a warning
  * in the matching hint. Use this at every site that sets the matching
@@ -1626,26 +1788,50 @@ function simMatchingToShown(state) {
  * drawAllEdges then makes sure the visual is still a proper matching
  * even if the set is wrong.
  */
+/**
+ * Assign shownMatching, run validation, and surface any problems.
+ *
+ * Two checks:
+ *   1. No dot instance touched by more than one matching edge (duplicate).
+ *   2. Every dot instance in the region (+ forced vertices) is touched by
+ *      exactly one matching edge (coverage). Unmatched dots mean the
+ *      matching is not perfect for the displayed region.
+ *
+ * The defensive per-dot guard in drawAllEdges ensures the rendered picture
+ * is always a proper matching regardless of what this check finds.
+ */
 function setShownMatching(newMatching) {
   shownMatching = newMatching;
-  const problems = validateMatchingSet(newMatching);
-  if (problems.length > 0) {
-    setMatchingHint(
-      `Internal warning: matching has ${problems.length} duplicate-dot issue(s). ` +
-      `Rendering enforces at most one edge per dot.`, true);
+  const { duplicates, unmatched } = validateMatchingSet(newMatching);
+  const msgs = [];
+  if (duplicates > 0) {
+    msgs.push(`${duplicates} dot(s) touched by multiple edges`);
+  }
+  if (unmatched > 0) {
+    msgs.push(`${unmatched} dot(s) have no matching edge`);
+  }
+  if (msgs.length > 0) {
+    setMatchingHint(`Warning: ${msgs.join('; ')}. Rendering enforces at most one edge per dot.`, true);
   }
 }
 
 /**
- * Validate that a Set of edge-instance keys represents a proper matching:
- * every dot instance is touched by at most one edge. Returns a list of
- * human-readable problems; an empty list means the matching is valid.
+ * Validate a matching Set against the current region (+ forced vertices).
+ *
+ * Returns { duplicates, unmatched }:
+ *   duplicates = number of dots touched by more than one matching edge
+ *   unmatched  = number of region dots touched by zero matching edges
+ *
+ * Both should be 0 for a valid perfect matching.
  */
 function validateMatchingSet(matching) {
-  if (!matching) return [];
-  const dotToEdge = new Map();  // dot instance key -> edge instance key
-  const problems  = [];
-  const win = getVisibleCellWindow();
+  if (!matching) return { duplicates: 0, unmatched: 0 };
+
+  // 1. Check for duplicates: scan all matched edges and count dots
+  //    touched more than once.
+  const dotToEdge = new Map();
+  let duplicates = 0;
+  const win = getRegionCellWindow();
 
   for (let i = win.minI; i <= win.maxI; i++) {
     for (let j = win.minJ; j <= win.maxJ; j++) {
@@ -1657,14 +1843,30 @@ function validateMatchingSet(matching) {
         const whiteKey = e.bId + '_' + ni + '_' + nj;
         for (const dotKey of [blackKey, whiteKey]) {
           if (dotToEdge.has(dotKey) && dotToEdge.get(dotKey) !== instKey) {
-            problems.push(`dot ${dotKey} is touched by multiple matching edges`);
+            duplicates++;
           }
           dotToEdge.set(dotKey, instKey);
         }
       }
     }
   }
-  return problems;
+
+  // 2. Check for unmatched dots: every dot instance that is in the region
+  //    (or forced) should appear in dotToEdge.
+  let unmatched = 0;
+  for (let i = win.minI; i <= win.maxI; i++) {
+    for (let j = win.minJ; j <= win.maxJ; j++) {
+      for (const d of dots) {
+        const key = d.id + '_' + i + '_' + j;
+        const inRegion = isPointInRegion(d.x + i * CELL_SIZE, d.y + j * CELL_SIZE);
+        if (inRegion && !dotToEdge.has(key)) {
+          unmatched++;
+        }
+      }
+    }
+  }
+
+  return { duplicates, unmatched };
 }
 
 function startSimulation() {
@@ -1676,6 +1878,7 @@ function startSimulation() {
   }
   simState = built;
   setShownMatching(simMatchingToShown(simState));
+  if (heightMode !== 'off') heightValues = computeHeightFunction(simState);
   simSteps = 0;
   simAccepted = 0;
 
@@ -1749,6 +1952,7 @@ function startSimulation() {
     // valid by construction: face flips swap matched ↔ unmatched around
     // a single face, preserving the 1:1 match invariant).
     shownMatching = simMatchingToShown(simState);
+    if (heightMode !== 'off') heightValues = computeHeightFunction(simState);
     updateSimStats();
     draw();
     simTimer = requestAnimationFrame(loop);
@@ -1785,17 +1989,17 @@ function updateSimStats() {
 }
 
 /**
- * Make the region tileable by adding specific outside vertices.
+ * Make the region tileable by sliding and growing it until a perfect
+ * matching exists.
  *
- * Algorithm (like the lozenge editor's repair):
- *   1. Run matching on the current induced subgraph.
- *   2. For each unmatched vertex, find an adjacent opposite-color vertex
- *      just outside the region and force-include it.
- *   3. Re-run matching with the expanded vertex set.
- *   4. Repeat until a perfect matching is found or no progress.
+ * Algorithm:
+ *   For each growth level (0 = original size, then increasingly larger):
+ *     Try translating the region to several nearby positions.
+ *     If any position gives a perfect matching, stop.
+ *   After exhausting all attempts, restore the original geometry.
  *
- * The added vertices are stored in `forcedVertices` and rendered at full
- * opacity alongside the region dots.
+ * Trying translations first is cheap and often fixes boundary imbalance
+ * without making the region larger than necessary.
  *
  * Returns { ok, matching, size, reason, adjusted }.
  */
@@ -1805,100 +2009,91 @@ function makeTileable() {
   const initial = findPerfectMatching();
   if (initial.ok) return { ...initial, adjusted: false };
 
-  for (let pass = 0; pass < 30; pass++) {
-    const vertices = enumerateRegionVertices();
-    const adj = buildInducedAdjacency(vertices);
+  const saved = cloneRegionGeom();
+  const nudge = CELL_SIZE * 0.2;
+  const growStep = CELL_SIZE * 0.25;
 
-    // Count and run matching.
-    let nB = 0, nW = 0;
-    for (const [, v] of vertices) {
-      if (v.color === 'B') nB++; else nW++;
+  // 8 compass directions + center = 9 translation offsets to try at
+  // each growth level.
+  const offsets = [
+    [0, 0],
+    [nudge, 0], [-nudge, 0], [0, nudge], [0, -nudge],
+    [nudge, nudge], [-nudge, nudge], [nudge, -nudge], [-nudge, -nudge]
+  ];
+
+  function stopSim() {
+    if (simTimer) {
+      cancelAnimationFrame(simTimer);
+      simTimer = null;
+      const btn = document.getElementById('btn-sim-start');
+      if (btn) { btn.textContent = 'Start'; btn.classList.remove('active'); }
     }
-    if (nB === 0 && nW === 0) break;
-
-    const matchBlack = new Map();
-    const matchWhite = new Map();
-
-    function augment(bk, visited) {
-      for (const link of adj.get(bk) || []) {
-        if (visited.has(link.whiteKey)) continue;
-        visited.add(link.whiteKey);
-        const ex = matchWhite.get(link.whiteKey);
-        if (!ex || augment(ex.blackKey, visited)) {
-          matchBlack.set(bk, link);
-          matchWhite.set(link.whiteKey, { blackKey: bk, instanceKey: link.instanceKey });
-          return true;
-        }
-      }
-      return false;
-    }
-
-    let matched = 0;
-    for (const bk of adj.keys()) {
-      if (augment(bk, new Set())) matched++;
-    }
-
-    if (matched === nB && nB === nW) {
-      // Perfect matching found. Stop any running simulation but keep
-      // forcedVertices (invalidateMatching would clear them).
-      if (simTimer) {
-        cancelAnimationFrame(simTimer);
-        simTimer = null;
-        const btn = document.getElementById('btn-sim-start');
-        if (btn) { btn.textContent = 'Start'; btn.classList.remove('active'); }
-      }
-      simState = null;
-      const instances = new Set();
-      for (const [, link] of matchBlack) instances.add(link.instanceKey);
-      return { ok: true, matching: instances, size: matched, adjusted: true };
-    }
-
-    // For each unmatched vertex, add an outside neighbor of opposite color.
-    let added = 0;
-
-    // Unmatched BLACK → add an outside WHITE neighbor.
-    for (const [bk,] of adj) {
-      if (matchBlack.has(bk)) continue;
-      const parts = bk.split('_');
-      const dotId = parseInt(parts[0]);
-      const ci = parseInt(parts[1]);
-      const cj = parseInt(parts[2]);
-      for (const e of edges) {
-        if (e.aId !== dotId) continue;
-        const wk = e.bId + '_' + (ci + e.dx) + '_' + (cj + e.dy);
-        if (!vertices.has(wk)) {
-          forcedVertices.add(wk);
-          added++;
-          break;
-        }
-      }
-    }
-
-    // Unmatched WHITE → add an outside BLACK neighbor.
-    for (const [wk, v] of vertices) {
-      if (v.color !== 'W') continue;
-      if (matchWhite.has(wk)) continue;
-      const parts = wk.split('_');
-      const dotId = parseInt(parts[0]);
-      const ci = parseInt(parts[1]);
-      const cj = parseInt(parts[2]);
-      for (const e of edges) {
-        if (e.bId !== dotId) continue;
-        const bk = e.aId + '_' + (ci - e.dx) + '_' + (cj - e.dy);
-        if (!vertices.has(bk)) {
-          forcedVertices.add(bk);
-          added++;
-          break;
-        }
-      }
-    }
-
-    if (added === 0) break;
+    simState = null;
   }
 
-  // Failed — clean up.
-  forcedVertices.clear();
-  return { ok: false, reason: 'Could not make tileable by adding boundary vertices.', adjusted: false };
+  function translateRegion(dx, dy) {
+    if (region.type === 'circle') {
+      region.circle.cx += dx;
+      region.circle.cy += dy;
+    } else if (region.type === 'rect') {
+      region.rect.x += dx;
+      region.rect.y += dy;
+    } else if (region.type === 'polygon') {
+      for (const p of region.polygon.points) { p.x += dx; p.y += dy; }
+    }
+  }
+
+  function growRegion() {
+    if (region.type === 'circle') {
+      region.circle.r += growStep;
+    } else if (region.type === 'rect') {
+      region.rect.x -= growStep / 2;
+      region.rect.y -= growStep / 2;
+      region.rect.w += growStep;
+      region.rect.h += growStep;
+    } else if (region.type === 'polygon') {
+      const pts = region.polygon.points;
+      const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+      const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+      region.polygon.points = pts.map(p => ({
+        x: cx + (p.x - cx) * 1.04,
+        y: cy + (p.y - cy) * 1.04
+      }));
+    }
+  }
+
+  for (let growth = 0; growth < 20; growth++) {
+    // Snapshot the geometry at this growth level so we can try
+    // multiple translations and revert between them.
+    const base = cloneRegionGeom();
+
+    for (const [dx, dy] of offsets) {
+      // Restore to the base geometry, then apply the translation.
+      region.rect    = { ...base.rect };
+      region.circle  = { ...base.circle };
+      region.polygon = { points: base.polygon.points.map(p => ({ ...p })) };
+      translateRegion(dx, dy);
+
+      const result = findPerfectMatching();
+      if (result.ok) {
+        stopSim();
+        return { ...result, adjusted: true };
+      }
+    }
+
+    // No translation worked at this size. Restore base and grow.
+    region.rect    = { ...base.rect };
+    region.circle  = { ...base.circle };
+    region.polygon = { points: base.polygon.points.map(p => ({ ...p })) };
+    growRegion();
+  }
+
+  // Failed: restore the original region geometry (clone to avoid
+  // shared references with the local `saved` object).
+  region.rect    = { ...saved.rect };
+  region.circle  = { ...saved.circle };
+  region.polygon = { points: saved.polygon.points.map(p => ({ ...p })) };
+  return { ok: false, reason: 'Could not find a tileable region after 40 growth steps.', adjusted: false };
 }
 
 /** Scale the region shape uniformly around a center point. */
@@ -1987,19 +2182,39 @@ function screenToWorld(p) {
 }
 
 function fitView() {
-  // Fit the region shape into the canvas, padded by 2 cells on each side
-  // so the surrounding lattice is visible (otherwise the region would feel
-  // disconnected from the tiling).
+  // Fit the view into the canvas, padded by 2 cells on each side.
+  // In the lattice stage the camera focuses on the fundamental cell
+  // (the editing area), not the full region, so going back to lattice
+  // after makeTileable grew the region doesn't shrink everything.
   const rect   = canvas.getBoundingClientRect();
   const margin = 40;
   const pad    = 2 * CELL_SIZE;
-  let bb       = regionBoundingBox();
+  let bb;
+  if (workflowStep === 'lattice') {
+    // Center on the fundamental cell.
+    const fi = region.fundamental.i;
+    const fj = region.fundamental.j;
+    bb = { x0: fi * CELL_SIZE, y0: fj * CELL_SIZE,
+           x1: (fi + 1) * CELL_SIZE, y1: (fj + 1) * CELL_SIZE };
+  } else {
+    bb = regionBoundingBox();
+  }
   bb = { x0: bb.x0 - pad, y0: bb.y0 - pad,
          x1: bb.x1 + pad, y1: bb.y1 + pad };
   const w = bb.x1 - bb.x0;
   const h = bb.y1 - bb.y0;
+  // Guard degenerate bounding boxes (collapsed region, single point) — the
+  // pad above usually keeps w,h positive, but a NaN region would cascade
+  // through scale → render and freeze the canvas.
+  if (!(w > 0) || !(h > 0) || !(rect.width > 0) || !(rect.height > 0)) {
+    view.scale = 1;
+    view.panX  = 0;
+    view.panY  = 0;
+    return;
+  }
   view.scale = Math.min((rect.width  - margin) / w,
                         (rect.height - margin) / h);
+  if (!(view.scale > 0) || !Number.isFinite(view.scale)) view.scale = 1;
   // Only update the dot-size reference during the lattice step (or on
   // the very first call). This keeps dots the same visual size when the
   // user moves to the region/sample steps where fitView zooms out to
@@ -2013,12 +2228,16 @@ function fitView() {
   view.panY = rect.height / 2 - cy * view.scale;
 }
 
-function getVisibleCellWindow() {
-  // Which integer cell offsets intersect the current canvas viewport?
-  // Walk the four screen corners back to world coordinates, divide by
-  // CELL_SIZE to get fractional cell indices, and snap outward to whole
-  // cells. Cap the window so extreme zoom-out can't render a million
-  // ghost cells and freeze the browser.
+/**
+ * Compute the cell-index window that covers the current canvas viewport.
+ *
+ * Two variants:
+ *   - gridOnly = false (default): capped at MAX_CELLS so we don't try to
+ *     render a million dots and edges. Used for the expensive layers.
+ *   - gridOnly = true: uncapped (the grid is just rectangles, very cheap).
+ *     This makes the lattice feel infinite as the user zooms out.
+ */
+function getVisibleCellWindow(gridOnly) {
   const rect = canvas.getBoundingClientRect();
   const tl   = screenToWorld({ x: 0,          y: 0 });
   const br   = screenToWorld({ x: rect.width, y: rect.height });
@@ -2027,16 +2246,37 @@ function getVisibleCellWindow() {
   let maxI = Math.floor(br.x / CELL_SIZE) + 1;
   let maxJ = Math.floor(br.y / CELL_SIZE) + 1;
 
-  const MAX_CELLS_PER_AXIS = 60;
-  if (maxI - minI > MAX_CELLS_PER_AXIS) {
-    const mid = Math.floor((minI + maxI) / 2);
-    minI = mid - Math.floor(MAX_CELLS_PER_AXIS / 2);
-    maxI = mid + Math.floor(MAX_CELLS_PER_AXIS / 2);
-  }
-  if (maxJ - minJ > MAX_CELLS_PER_AXIS) {
-    const mid = Math.floor((minJ + maxJ) / 2);
-    minJ = mid - Math.floor(MAX_CELLS_PER_AXIS / 2);
-    maxJ = mid + Math.floor(MAX_CELLS_PER_AXIS / 2);
+  // Grid-only has a generous cap (just rectangles, very cheap).
+  // Dots/edges have a tighter cap (more draw calls per cell).
+  if (gridOnly) {
+    const MAX_GRID = 200;
+    if (maxI - minI > MAX_GRID) {
+      const mid = Math.floor((minI + maxI) / 2);
+      minI = mid - Math.floor(MAX_GRID / 2);
+      maxI = mid + Math.floor(MAX_GRID / 2);
+    }
+    if (maxJ - minJ > MAX_GRID) {
+      const mid = Math.floor((minJ + maxJ) / 2);
+      minJ = mid - Math.floor(MAX_GRID / 2);
+      maxJ = mid + Math.floor(MAX_GRID / 2);
+    }
+  } else {
+    // Cap is generous (300 ≈ 90k cells) so the lattice extends well
+    // past the viewport at any practical zoom and feels infinite.
+    // The expensive edge layer is LOD-culled at small cellPx in
+    // drawAllEdges, so this larger window stays performant; dots
+    // shrink with zoomFactor and stay cheap.
+    const MAX_CELLS_PER_AXIS = 300;
+    if (maxI - minI > MAX_CELLS_PER_AXIS) {
+      const mid = Math.floor((minI + maxI) / 2);
+      minI = mid - Math.floor(MAX_CELLS_PER_AXIS / 2);
+      maxI = mid + Math.floor(MAX_CELLS_PER_AXIS / 2);
+    }
+    if (maxJ - minJ > MAX_CELLS_PER_AXIS) {
+      const mid = Math.floor((minJ + maxJ) / 2);
+      minJ = mid - Math.floor(MAX_CELLS_PER_AXIS / 2);
+      maxJ = mid + Math.floor(MAX_CELLS_PER_AXIS / 2);
+    }
   }
   return { minI, maxI, minJ, maxJ };
 }
@@ -2049,17 +2289,21 @@ function draw() {
   const rect = canvas.getBoundingClientRect();
   ctx.clearRect(0, 0, rect.width, rect.height);
 
+  // ---- 3D mode: clean white canvas with only the solid surface ----
+  if (heightMode === '3d' && heightValues && simState) {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, rect.width, rect.height);
+    draw3DHeightSurface(simState);
+    return;
+  }
+
+  // ---- Normal 2D rendering (all other modes) ----
   const win = getVisibleCellWindow();
 
-  // Layer 1: lattice cell backgrounds , every visible cell gets a faint
-  // outline so the periodic grid is visible everywhere.
-  drawLatticeGrid(win);
+  // Layer 1: lattice cell backgrounds (infinite grid).
+  drawLatticeGrid();
 
-  // Layer 2: highlight the inside of the region shape with a brighter
-  // background so the user sees exactly which area is "in". In the
-  // 'lattice' build step the region is hidden entirely. In 'region' it's
-  // drawn more translucent so the lattice underneath remains clearly
-  // visible. In 'edit' it's drawn opaque.
+  // Layer 2: region highlight.
   if (workflowStep !== 'lattice') {
     ctx.save();
     regionPath();
@@ -2070,42 +2314,385 @@ function draw() {
     ctx.restore();
   }
 
-  // Layer 3: edges. Walk every visible cell, every edge in the data, and
-  // emit a line for the (i, j) translate of that edge.
+  // Layer 2.5: 2D heatmap (behind edges and dots).
+  if (heightMode === '2d' && heightValues && simState) {
+    draw2DHeightMap(simState);
+  }
+
+  // Layer 3: edges.
   drawAllEdges(win);
 
-  // Layer 4: dots. Same iteration but per dot, deciding real vs ghost
-  // based on whether the dot's world position is inside the region shape.
+  // Layer 4: dots.
   drawAllDots(win);
 
-  // Layer 5: outline of the fundamental cell. Always shown in the
-  // lattice-build step (it's the editing target). In region and sample
-  // steps it's hidden by default but the user can toggle it on via the
-  // "Show cell outline" checkbox.
+  // Layer 5: fundamental cell outline.
   if (workflowStep === 'lattice' || showFundamentalOutline) {
     drawFundamentalOutline(workflowStep === 'lattice');
   }
 
-  // Layer 6: the region shape outline + resize handles, on top.
-  // Hidden in the lattice-build step, since the region doesn't exist yet.
+  // Layer 6: region shape outline + resize handles.
   if (workflowStep !== 'lattice') drawRegionShape();
 }
 
-function drawLatticeGrid(win) {
+// ---- Height-function rendering (2D heatmap + 3D stepped surface) ----
+//
+// The height function assigns an integer to each FACE of the planar graph.
+// Adjacent faces differ by exactly +/-1.  Two view modes:
+//
+//   2D Heatmap: flat colored polygons overlaid on the matching view.
+//   3D Surface: an interactive stepped surface the user can rotate.
+//               Each face is a flat polygon at its height level.  Between
+//               adjacent faces at different heights, vertical wall quads
+//               ("cliffs") are drawn.  Everything is depth-sorted with the
+//               painter's algorithm.
+//
+// IMPORTANT: the face enumeration includes the OUTER (unbounded) face.
+// We detect it by signed area (the outer face wraps clockwise and has
+// negative signed area) and skip it.
+
+/**
+ * Compute signed area of a face polygon in world coordinates.
+ * Positive = CCW (inner face), negative = CW (outer face).
+ */
+function faceSignedArea(face, vertices) {
+  let area = 0;
+  const pts = [];
+  for (const [u] of face) {
+    const v = vertices.get(u);
+    if (!v) return 0;
+    pts.push({ x: v.d.x + v.i * CELL_SIZE, y: v.d.y + v.j * CELL_SIZE });
+  }
+  for (let i = 0; i < pts.length; i++) {
+    const j = (i + 1) % pts.length;
+    area += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
+  }
+  return area / 2;
+}
+
+/**
+ * Color for a face at height h.  Diverging blue-white-orange.
+ */
+function heightColor(h, range, alpha) {
+  const a = alpha != null ? alpha : 1;
+  const t = Math.max(-1, Math.min(1, h / Math.max(1, range)));
+  if (t >= 0) {
+    return `rgba(255,${Math.round(255 - t * 130)},${Math.round(255 - t * 255)},${a})`;
+  }
+  const at = -t;
+  return `rgba(${Math.round(255 - at * 200)},${Math.round(255 - at * 120)},255,${a})`;
+}
+
+/** Darker wall shade. */
+function wallShade(h, range) {
+  const t = Math.max(-1, Math.min(1, h / Math.max(1, range)));
+  if (t >= 0) {
+    return `rgb(${Math.round(190 - t * 50)},${Math.round(170 - t * 90)},${Math.round(150 - t * 150)})`;
+  }
+  const a = -t;
+  return `rgb(${Math.round(150 - a * 110)},${Math.round(160 - a * 70)},${Math.round(195 + a * 20)})`;
+}
+
+function heightRange() {
+  if (!heightValues) return 1;
+  let mx = 0;
+  for (const h of heightValues.values()) mx = Math.max(mx, Math.abs(h));
+  return Math.max(1, mx);
+}
+
+/**
+ * Return the set of inner face indices (skip the outer/unbounded face).
+ */
+function innerFaceIndices(faces, vertices) {
+  const out = [];
+  // The outer face has the largest absolute signed area (and is CW,
+  // so negative in standard convention).  Find it and skip it.
+  let outerIdx = -1, outerArea = 0;
+  for (let fi = 0; fi < faces.length; fi++) {
+    const a = Math.abs(faceSignedArea(faces[fi], vertices));
+    if (a > outerArea) { outerArea = a; outerIdx = fi; }
+  }
+  for (let fi = 0; fi < faces.length; fi++) {
+    if (fi !== outerIdx) out.push(fi);
+  }
+  return out;
+}
+
+// ---- 2D heatmap ----
+
+function draw2DHeightMap(state) {
+  if (!heightValues || heightValues.size === 0) return;
+  const { faces, vertices } = state;
+  const range = heightRange();
+  const inner = innerFaceIndices(faces, vertices);
+
+  ctx.save();
+  for (const fi of inner) {
+    if (!heightValues.has(fi)) continue;
+    const face = faces[fi];
+    const h = heightValues.get(fi);
+    ctx.beginPath();
+    for (let k = 0; k < face.length; k++) {
+      const vd = vertices.get(face[k][0]);
+      if (!vd) continue;
+      const sp = worldToScreen({
+        x: vd.d.x + vd.i * CELL_SIZE,
+        y: vd.d.y + vd.j * CELL_SIZE
+      });
+      if (k === 0) ctx.moveTo(sp.x, sp.y);
+      else         ctx.lineTo(sp.x, sp.y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = heightColor(h, range, 0.55);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ---- 3D stepped surface ----
+
+/**
+ * Project a 3D point through the orbiting camera to screen.
+ * Returns { x, y, depth }.
+ */
+function project3D(wx, wy, wz, center) {
+  let X = wx - center.x;
+  let Y = wy - center.y;
+  let Z = wz;
+
+  // Rotate around Z by camTheta (horizontal orbit).
+  const ct = Math.cos(camTheta), st = Math.sin(camTheta);
+  const X1 = X * ct - Y * st;
+  const Y1 = X * st + Y * ct;
+
+  // Tilt around X by camPhi (elevation: 0 = top-down, PI/2 = side).
+  const cp = Math.cos(camPhi), sp = Math.sin(camPhi);
+  const Y2 = Y1 * cp - Z * sp;
+  const Z2 = Y1 * sp + Z * cp;
+
+  // Translate the rotation pivot back into world space so a 3D point at
+  // (center.x, center.y, 0) lands at the same screen pixel as the 2D
+  // renderer's worldToScreen({x:center.x, y:center.y}). Without this,
+  // switching from 2D → 3D visibly shifts the object to the canvas
+  // origin even when camTheta=camPhi=0.
+  return {
+    x: (X1 + center.x) * view.scale + view.panX,
+    y: (Y2 + center.y) * view.scale + view.panY,
+    depth: Z2
+  };
+}
+
+function draw3DHeightSurface(state) {
+  if (!heightValues || heightValues.size === 0) return;
+  const { faces, vertices } = state;
+
+  const LIFT  = CELL_SIZE * 0.15;
+  const range = heightRange();
+  const inner = innerFaceIndices(faces, vertices);
+  const innerSet = new Set(inner);
+
+  // Rotation pivot: center of mass of all vertices.
+  let cx = 0, cy = 0, nv = 0;
+  for (const [, v] of vertices) {
+    cx += v.d.x + v.i * CELL_SIZE;
+    cy += v.d.y + v.j * CELL_SIZE;
+    nv++;
+  }
+  const center = { x: cx / Math.max(1, nv), y: cy / Math.max(1, nv) };
+
+  const faceAdj = buildFaceAdjacency(faces);
+
+  function vpos(key) {
+    const v = vertices.get(key);
+    if (!v) return null;
+    return { x: v.d.x + v.i * CELL_SIZE, y: v.d.y + v.j * CELL_SIZE };
+  }
+
+  // ---- Lighting ----
+  // Fixed directional light from upper-right-front.  We compute the
+  // surface normal of each polygon in camera space and dot it with the
+  // light direction to get a brightness factor.  This gives proper
+  // shading: top faces are bright, side walls are darker, and the
+  // darkening depends on the viewing angle.
+  const lightDir = [0.35, 0.25, 0.9];  // world-space (x, y, up)
+  const llen = Math.sqrt(lightDir[0] ** 2 + lightDir[1] ** 2 + lightDir[2] ** 2);
+  lightDir[0] /= llen; lightDir[1] /= llen; lightDir[2] /= llen;
+
+  // Compute brightness from a 3D polygon normal (world space, pre-rotation).
+  function shade(nx, ny, nz) {
+    const d = nx * lightDir[0] + ny * lightDir[1] + nz * lightDir[2];
+    return Math.max(0.25, Math.min(1.0, 0.35 + 0.65 * Math.max(0, d)));
+  }
+
+  // Apply brightness to an RGB base color.
+  function lit(r, g, b, brightness) {
+    return `rgb(${Math.round(r * brightness)},${Math.round(g * brightness)},${Math.round(b * brightness)})`;
+  }
+
+  // ---- Color scheme ----
+  // Use height-based tinting: a warm palette (cream to orange to deep
+  // orange) for the top face, tinted by height.  Walls get a cooler,
+  // darker navy-ish shade.
+  function topBaseRGB(h, range) {
+    const t = Math.max(-1, Math.min(1, h / Math.max(1, range)));
+    if (t >= 0) {
+      return [255, Math.round(240 - t * 110), Math.round(220 - t * 200)];
+    }
+    const a = -t;
+    return [Math.round(230 - a * 140), Math.round(235 - a * 80), 255];
+  }
+
+  // Walls use a flat navy-ish tone.
+  const WALL_BASE = [90, 100, 140];
+
+  const prims = [];
+
+  // 1. Face top polygons.
+  for (const fi of inner) {
+    if (!heightValues.has(fi)) continue;
+    const face = faces[fi];
+    const h = heightValues.get(fi);
+    const pts = [];
+    for (const [u] of face) {
+      const p = vpos(u);
+      if (p) pts.push(p);
+    }
+    if (pts.length < 3) continue;
+
+    // Face normal in world space: top faces point straight up.
+    const brightness = shade(0, 0, 1);
+    const [br, bg, bb] = topBaseRGB(h, range);
+    const color = lit(br, bg, bb, brightness);
+
+    const projected = pts.map(p => project3D(p.x, p.y, h * LIFT, center));
+    const avgDepth  = projected.reduce((s, p) => s + p.depth, 0) / projected.length;
+
+    prims.push({
+      depth: avgDepth,
+      draw() {
+        ctx.beginPath();
+        for (let k = 0; k < projected.length; k++) {
+          if (k === 0) ctx.moveTo(projected[k].x, projected[k].y);
+          else         ctx.lineTo(projected[k].x, projected[k].y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+      }
+    });
+  }
+
+  // Helper: emit a wall quad between two world points at two heights.
+  function addWall(pu, pv, hLow, hHigh) {
+    const edx = pv.x - pu.x, edy = pv.y - pu.y;
+    const elen = Math.sqrt(edx * edx + edy * edy) || 1;
+    const wnx = -edy / elen, wny = edx / elen;
+    const brightness = shade(wnx, wny, 0);
+    const color = lit(WALL_BASE[0], WALL_BASE[1], WALL_BASE[2], brightness);
+
+    const corners = [
+      project3D(pu.x, pu.y, hLow  * LIFT, center),
+      project3D(pv.x, pv.y, hLow  * LIFT, center),
+      project3D(pv.x, pv.y, hHigh * LIFT, center),
+      project3D(pu.x, pu.y, hHigh * LIFT, center)
+    ];
+    const avgDepth = corners.reduce((s, c) => s + c.depth, 0) / 4;
+
+    prims.push({
+      depth: avgDepth,
+      draw() {
+        ctx.beginPath();
+        ctx.moveTo(corners[0].x, corners[0].y);
+        ctx.lineTo(corners[1].x, corners[1].y);
+        ctx.lineTo(corners[2].x, corners[2].y);
+        ctx.lineTo(corners[3].x, corners[3].y);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+      }
+    });
+  }
+
+  // 2. Interior walls (between inner faces at different heights).
+  const wallsSeen = new Set();
+  for (const fi of inner) {
+    if (!heightValues.has(fi)) continue;
+    const hA = heightValues.get(fi);
+    for (const { neighbor, u, v } of faceAdj[fi]) {
+      if (!innerSet.has(neighbor) || !heightValues.has(neighbor)) continue;
+      const hB = heightValues.get(neighbor);
+      if (hA === hB) continue;
+      const wk = Math.min(fi, neighbor) + '_' + Math.max(fi, neighbor);
+      if (wallsSeen.has(wk)) continue;
+      wallsSeen.add(wk);
+      const pu = vpos(u), pv = vpos(v);
+      if (!pu || !pv) continue;
+      addWall(pu, pv, Math.min(hA, hB), Math.max(hA, hB));
+    }
+  }
+
+  // 3. Boundary walls (inner face adjacent to outer face, cliff to h=0).
+  for (const fi of inner) {
+    if (!heightValues.has(fi)) continue;
+    const h = heightValues.get(fi);
+    if (h === 0) continue;
+    for (const { neighbor, u, v } of faceAdj[fi]) {
+      if (innerSet.has(neighbor)) continue;
+      const pu = vpos(u), pv = vpos(v);
+      if (!pu || !pv) continue;
+      addWall(pu, pv, Math.min(0, h), Math.max(0, h));
+    }
+  }
+
+  // 4. Sort back-to-front.
+  prims.sort((a, b) => a.depth - b.depth);
+
+  // 5. Draw.
+  ctx.save();
+  for (const p of prims) p.draw();
+  ctx.restore();
+}
+
+function drawLatticeGrid() {
+  // Use the uncapped grid window so the background always fills the
+  // viewport, making the lattice feel infinite as the user zooms out.
+  const gridWin = getVisibleCellWindow(true);
+  const cellPx  = CELL_SIZE * view.scale;
+
+  // When cells are smaller than 2px, skip per-cell drawing and just
+  // fill the entire canvas with the background color.
+  if (cellPx < 2) {
+    const rect = canvas.getBoundingClientRect();
+    ctx.fillStyle = '#fbf7ec';
+    ctx.fillRect(0, 0, rect.width, rect.height);
+    return;
+  }
+
+  ctx.fillStyle   = '#fbf7ec';
   ctx.strokeStyle = '#e6e2d6';
   ctx.lineWidth   = 1;
-  ctx.fillStyle   = '#fbf7ec';
-  for (let i = win.minI; i <= win.maxI; i++) {
-    for (let j = win.minJ; j <= win.maxJ; j++) {
+
+  // When cells are small (< 8px), skip the stroke to avoid visual noise
+  // and improve performance.
+  const drawStroke = cellPx >= 8;
+
+  for (let i = gridWin.minI; i <= gridWin.maxI; i++) {
+    for (let j = gridWin.minJ; j <= gridWin.maxJ; j++) {
       const tl = worldToScreen({ x: i       * CELL_SIZE, y: j       * CELL_SIZE });
       const br = worldToScreen({ x: (i + 1) * CELL_SIZE, y: (j + 1) * CELL_SIZE });
       ctx.fillRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
-      ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+      if (drawStroke) ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
     }
   }
 }
 
 function drawAllEdges(win) {
+  // LOD: when cells render smaller than ~14px, the edges become visual
+  // noise and dominate the per-frame cost. Skip them entirely so the
+  // user can still see the dot pattern (the lattice "feels infinite")
+  // without burning frame budget on lines no one can resolve.
+  const cellPx = CELL_SIZE * view.scale;
+  if (cellPx < 14 && !shownMatching) return;
+
   ctx.lineCap = 'round';
 
   // When showing a matching, do TWO passes:
@@ -2251,6 +2838,18 @@ function drawAllDots(win) {
           ctx.fill();
         }
 
+        // Red ring around blacks that the most recent matching attempt
+        // could not pair (isolated or Hall-blocked). Cleared on success
+        // or when the graph/region changes.
+        if (unmatchedVertexKeys.size > 0 &&
+            unmatchedVertexKeys.has(d.id + '_' + i + '_' + j)) {
+          ctx.beginPath();
+          ctx.arc(sp.x, sp.y, baseRadius + 4, 0, 2 * Math.PI);
+          ctx.strokeStyle = '#c0392b';
+          ctx.lineWidth   = 2.2 * zoomFactor;
+          ctx.stroke();
+        }
+
         ctx.globalAlpha = inRegion ? 1.0 : 0.45;
         const r = inRegion ? baseRadius : baseRadius * 0.75;
         ctx.beginPath();
@@ -2324,9 +2923,19 @@ function setWorkflowStep(newStep) {
   vertexDrag       = null;
   connectSelection = null;
 
-  // Leaving the Sample stage stops any running simulation.
-  if (prevStep === 'sample' && newStep !== 'sample' && simTimer) {
-    stopSimulation();
+  // Leaving the Sample stage stops any running simulation and resets
+  // the height-function view to off (3D makes no sense outside Sample).
+  if (prevStep === 'sample' && newStep !== 'sample') {
+    if (simTimer) stopSimulation();
+    if (heightMode !== 'off') {
+      heightMode = 'off';
+      heightValues = null;
+      const inp = document.querySelector('input[name="height-mode"][value="off"]');
+      if (inp) inp.checked = true;
+      for (const lbl of document.querySelectorAll('#height-mode-row .stage-radio')) {
+        lbl.classList.toggle('active', lbl.querySelector('input').value === 'off');
+      }
+    }
   }
 
   // Leaving the Region stage backward (→ Lattice) unfixes the region so
@@ -2422,6 +3031,10 @@ function updateWorkflowUI() {
   if (outlineToggle) {
     outlineToggle.style.display = (workflowStep === 'region' || workflowStep === 'sample') ? '' : 'none';
   }
+  const heightRow = document.getElementById('height-mode-row');
+  if (heightRow) {
+    heightRow.style.display = (workflowStep === 'sample') ? '' : 'none';
+  }
 }
 
 // (goNextStep / goPrevStep replaced by stage radio buttons in updateWorkflowUI)
@@ -2430,7 +3043,11 @@ function setMode(newMode) {
   mode = newMode;
   for (const id of ['add-black', 'add-white', 'move', 'erase', 'edit-edges']) {
     const btn = document.getElementById('btn-' + id);
-    if (btn) btn.classList.toggle('active', id === newMode);
+    if (btn) {
+      const on = id === newMode;
+      btn.classList.toggle('active', on);
+      if (btn.hasAttribute('aria-pressed')) btn.setAttribute('aria-pressed', String(on));
+    }
   }
   // Polygon vertex-edit buttons are separate so they can be toggled too.
   const addVBtn = document.getElementById('btn-poly-add-vertex');
@@ -2474,11 +3091,13 @@ function invalidateMatching() {
     const btn = document.getElementById('btn-sim-start');
     if (btn) { btn.textContent = 'Start'; btn.classList.remove('active'); }
   }
-  simState = null;
+  simState     = null;
+  heightValues = null;
   const statsEl = document.getElementById('sim-stats');
   if (statsEl) statsEl.textContent = '';
 
   forcedVertices.clear();
+  unmatchedVertexKeys.clear();
   if (shownMatching) {
     shownMatching = null;
     setMatchingHint('Matching cleared (the graph or region changed).', false);
@@ -2829,11 +3448,24 @@ function handleMouseDown(event) {
   downPoint    = { x: event.clientX, y: event.clientY };
   dragDistance = 0;
 
-  // Right-button or Ctrl/Cmd + left-button = pan.
+  // Right-button or Ctrl/Cmd + left-button = pan (works in all modes).
   if (event.button === 2 || event.ctrlKey || event.metaKey) {
     isPanning = true;
     panStart  = { x: event.clientX, y: event.clientY,
                   panX: view.panX,  panY: view.panY };
+    event.preventDefault();
+    return;
+  }
+
+  // In 3D height mode, left-button drag rotates the camera.
+  if (heightMode === '3d' && event.button === 0) {
+    camDrag = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startTheta: camTheta,
+      startPhi:   camPhi
+    };
+    canvas.style.cursor = 'grabbing';
     event.preventDefault();
     return;
   }
@@ -2930,6 +3562,16 @@ function handleMouseMove(event) {
     draw();
     return;
   }
+  // 3D camera rotation drag.
+  if (camDrag) {
+    const dx = event.clientX - camDrag.startX;
+    const dy = event.clientY - camDrag.startY;
+    camTheta = camDrag.startTheta - dx * 0.007;
+    camPhi   = Math.max(0.05, Math.min(Math.PI / 2 - 0.05,
+               camDrag.startPhi + dy * 0.007));
+    draw();
+    return;
+  }
   if (regionDrag) {
     const rect = canvas.getBoundingClientRect();
     const wp   = screenToWorld({ x: event.clientX - rect.left,
@@ -2953,6 +3595,13 @@ function handleMouseMove(event) {
 }
 
 function handleMouseUp(event) {
+  // End 3D camera drag.
+  if (camDrag) {
+    camDrag = null;
+    canvas.style.cursor = (heightMode === '3d') ? 'grab' : 'crosshair';
+    downPoint = null;
+    return;
+  }
   const wasRegionDrag = !!regionDrag;
   const wasVertexDrag = !!vertexDrag;
   if (wasVertexDrag) {
@@ -3020,6 +3669,11 @@ function applyRegionDrag(wp) {
 }
 
 function updateCanvasCursor(event) {
+  // In 3D mode the canvas is always a grab cursor (drag to rotate).
+  if (heightMode === '3d') {
+    canvas.style.cursor = camDrag ? 'grabbing' : 'grab';
+    return;
+  }
   const rect = canvas.getBoundingClientRect();
   const wp   = screenToWorld({ x: event.clientX - rect.left,
                                y: event.clientY - rect.top });
@@ -3263,6 +3917,40 @@ function init() {
     draw();
   });
 
+  // Height-function mode selector.
+  // Height-mode radio buttons (styled like the workflow stage radios).
+  for (const radio of document.querySelectorAll('input[name="height-mode"]')) {
+    radio.addEventListener('change', (e) => {
+      setHeightMode(e.target.value);
+    });
+  }
+  // Keep the radio-button "active" class in sync.
+  function updateHeightRadioUI() {
+    for (const lbl of document.querySelectorAll('#height-mode-row .stage-radio')) {
+      const inp = lbl.querySelector('input');
+      lbl.classList.toggle('active', inp.checked);
+    }
+  }
+  function setHeightMode(mode) {
+    heightMode = mode;
+    // Sync the radio input in case we called this programmatically.
+    const inp = document.querySelector(`input[name="height-mode"][value="${mode}"]`);
+    if (inp) inp.checked = true;
+    updateHeightRadioUI();
+
+    if (heightMode !== 'off') {
+      if (!simState && shownMatching) {
+        const built = buildSimState();
+        if (built.ok) simState = built;
+      }
+      if (simState) heightValues = computeHeightFunction(simState);
+    } else {
+      heightValues = null;
+    }
+    draw();
+  }
+  updateHeightRadioUI();
+
   // Matching controls. All three actions have the same shape: run an
   // algorithm, and either show its matching (valid case) or its error
   // message (invalid case). `runMatching` factors that pattern out.
@@ -3270,12 +3958,15 @@ function init() {
     const result = fn();
     if (!result.ok) {
       shownMatching = null;
+      unmatchedVertexKeys = result.unmatched || new Set();
       setMatchingHint(result.reason, true);
     } else {
+      unmatchedVertexKeys = new Set();
       setShownMatching(result.matching);
       // Only overwrite the hint if validateMatchingSet didn't surface a
       // warning (in which case the warning should stay visible).
-      if (validateMatchingSet(result.matching).length === 0) {
+      const v = validateMatchingSet(result.matching);
+      if (v.duplicates === 0 && v.unmatched === 0) {
         setMatchingHint(successMsg(result), false);
       }
     }
@@ -3293,6 +3984,8 @@ function init() {
   document.getElementById('btn-hide-matching').addEventListener('click', () => {
     if (simTimer) stopSimulation();
     shownMatching = null;
+    heightValues  = null;
+    simState      = null;
     forcedVertices.clear();
     setMatchingHint('');
     document.getElementById('sim-stats').textContent = '';
@@ -3322,13 +4015,40 @@ function init() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && simInfoModal.classList.contains('open')) closeSimInfo();
   });
+
+  // Keyboard shortcuts. Skip when the user is typing in an input/select so
+  // they don't fire while editing the seed value, etc.
+  document.addEventListener('keydown', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+
+    // Space: start/stop the simulation. Only meaningful in the sample step
+    // (the button is a no-op outside of it, but click() still triggers
+    // setMatchingHint, so guard here).
+    if (e.code === 'Space') {
+      const btn = document.getElementById('btn-sim-start');
+      if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
+    }
+    // R: re-roll a random matching.
+    else if (e.key === 'r' || e.key === 'R') {
+      const btn = document.getElementById('btn-random-matching');
+      if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
+    }
+    // S: show the canonical matching.
+    else if (e.key === 's' || e.key === 'S') {
+      const btn = document.getElementById('btn-show-matching');
+      if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
+    }
+  });
   document.getElementById('btn-make-tileable').addEventListener('click', () => {
-    setMatchingHint('Adding boundary vertices...', false);
+    setMatchingHint('Growing region to find a tileable boundary...', false);
     setTimeout(() => {
       runMatching(makeTileable, (r) => r.adjusted
-        ? `Added ${forcedVertices.size} vertices. Showing a perfect matching with ${r.size} edges.`
-        : `Already tileable. Showing a perfect matching with ${r.size} edges.`);
+        ? `Region grown. Perfect matching with ${r.size} edges.`
+        : `Already tileable. Perfect matching with ${r.size} edges.`);
       updateStatus();
+      fitView();
       draw();
     }, 30);
   });
@@ -3351,12 +4071,6 @@ function init() {
   updateWorkflowUI();
   updateStatus();
   draw();
-}
-
-window.addEventListener('DOMContentLoaded', init);
-</script>
-</body>
-</html>
 }
 
 window.addEventListener('DOMContentLoaded', init);
